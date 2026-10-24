@@ -10,7 +10,7 @@ module.exports = function initUpdater({ ipcMain, app, getWindow }) {
   // Для отладки: UPDATE_TEST_FROM=2.0.0 притворяется старой версией и ходит в тот же репозиторий
   const test = process.env.UPDATE_TEST_FROM;
   const enabled = app.isPackaged || !!test;
-  let state = { status: enabled ? 'idle' : 'dev', current: test || app.getVersion(), version: '', notes: '', percent: 0, error: '', checkedAt: 0 };
+  let state = { status: enabled ? 'idle' : 'dev', current: test || app.getVersion(), version: '', notes: '', percent: 0, error: '', detail: '', checkedAt: 0 };
   const push = (patch) => {
     state = { ...state, ...patch };
     const w = getWindow(); if (w && !w.isDestroyed()) w.webContents.send('update:state', state);
@@ -25,7 +25,11 @@ module.exports = function initUpdater({ ipcMain, app, getWindow }) {
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowPrerelease = false;
     autoUpdater.logger = null;
-    if (test) { autoUpdater.forceDevUpdateConfig = true; autoUpdater.currentVersion = test; autoUpdater.setFeedURL({ provider: 'github', owner: OWNER, repo: REPO }); }
+    if (test) {
+      autoUpdater.forceDevUpdateConfig = true; autoUpdater.currentVersion = new autoUpdater.currentVersion.constructor(test);   // тот же класс версии, что использует сам electron-updater
+      // для проверки без публикации: UPDATE_TEST_URL=http://127.0.0.1:порт указывает на папку с latest.yml
+      autoUpdater.setFeedURL(process.env.UPDATE_TEST_URL ? { provider: 'generic', url: process.env.UPDATE_TEST_URL } : { provider: 'github', owner: OWNER, repo: REPO });
+    }
     autoUpdater.on('checking-for-update', () => push({ status: 'checking', error: '' }));
     autoUpdater.on('update-available', (i) => push({ status: 'available', version: i.version, notes: plain(i.releaseNotes), checkedAt: Date.now() }));
     autoUpdater.on('update-not-available', () => push({ status: 'none', checkedAt: Date.now() }));
@@ -38,7 +42,7 @@ module.exports = function initUpdater({ ipcMain, app, getWindow }) {
     if (!enabled) return state;
     if (['checking', 'downloading', 'ready'].includes(state.status)) return state;
     try { await autoUpdater.checkForUpdates(); }
-    catch (e) { push({ status: manual ? 'error' : state.status === 'checking' ? 'idle' : state.status, error: manual ? 'Нет связи с GitHub. Проверьте интернет.' : '' }); }
+    catch (e) { push({ status: manual ? 'error' : state.status === 'checking' ? 'idle' : state.status, error: manual ? 'Не удалось проверить обновления. Проверьте интернет.' : '', detail: String((e && e.message) || e).split(String.fromCharCode(10))[0].slice(0, 180) }); }
     return state;
   }
 
@@ -47,7 +51,7 @@ module.exports = function initUpdater({ ipcMain, app, getWindow }) {
   ipcMain.handle('update:download', async () => {
     if (state.status !== 'available') return state;
     push({ status: 'downloading', percent: 0 });
-    try { await autoUpdater.downloadUpdate(); } catch (e) { push({ status: 'error', error: 'Не удалось скачать обновление. Попробуйте ещё раз.' }); }
+    try { await autoUpdater.downloadUpdate(); } catch (e) { push({ status: 'error', error: 'Не удалось скачать обновление. Попробуйте ещё раз.', detail: String((e && e.message) || e).split(String.fromCharCode(10))[0].slice(0, 180) }); }
     return state;
   });
   // установка: приложение закроется, поставит новую версию и запустится снова
