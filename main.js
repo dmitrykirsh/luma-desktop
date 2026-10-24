@@ -17,6 +17,7 @@ protocol.registerSchemesAsPrivileged([
   { scheme: 'tmdbimg', privileges: { standard: true, secure: true, supportFetchAPI: true } },
   { scheme: 'lumatv', privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true, stream: true } }
 ]);
+const imgBad = new Map();   // источник картинок -> до какого времени считаем неработающим
 let imgActive = 0; const imgQueue = [];
 const imgSlot = () => new Promise((res) => { const go = () => { imgActive++; res(); }; imgActive < 4 ? go() : imgQueue.push(go); });
 const imgDone = () => { imgActive--; const n = imgQueue.shift(); if (n) n(); };
@@ -30,24 +31,39 @@ function setupImageProxy() {
     const type = u.pathname.endsWith('.png') ? 'image/png' : 'image/jpeg';
     try { return new Response(fs.readFileSync(file), { headers: { 'content-type': type, 'cache-control': 'max-age=86400' } }); } catch {}
     await imgSlot();
+    const save = async (r) => {
+      const buf = Buffer.from(await r.arrayBuffer());
+      try { fs.writeFileSync(file, buf); } catch {}
+      return new Response(buf, { headers: { 'content-type': r.headers.get('content-type') || type, 'cache-control': 'max-age=86400' } });
+    };
+    // Порядок источников: прямой адрес TMDB, свой посредник (если задан), публичный прокси картинок.
+    // Если прямой путь не отвечает, он на 10 минут уходит в конец очереди, чтобы не ждать таймаут на каждой картинке.
+    const px = String(store.tmdbProxy || '').replace(/\/+$/, '');
+    const sources = [
+      { id: 'direct', url: 'https://image.tmdb.org' + u.pathname, ms: 6000 },
+      ...(px ? [{ id: 'proxy', url: px + '/img' + u.pathname, ms: 8000 }] : []),
+      { id: 'wsrv', url: 'https://wsrv.nl/?url=' + encodeURIComponent('image.tmdb.org' + u.pathname), ms: 10000 },
+      { id: 'weserv', url: 'https://images.weserv.nl/?url=' + encodeURIComponent('image.tmdb.org' + u.pathname), ms: 10000 }
+    ];
+    sources.sort((a, b) => ((imgBad.get(a.id) || 0) > Date.now() ? 1 : 0) - ((imgBad.get(b.id) || 0) > Date.now() ? 1 : 0));
     try {
-      for (let i = 0; i < 4; i++) {
-        try {
-          const r = await net.fetch('https://image.tmdb.org' + u.pathname, { signal: AbortSignal.timeout(15000) });
-          if (r.ok) {
-            const buf = Buffer.from(await r.arrayBuffer());
-            try { fs.writeFileSync(file, buf); } catch {}
-            return new Response(buf, { headers: { 'content-type': r.headers.get('content-type') || type, 'cache-control': 'max-age=86400' } });
-          }
-          if (r.status === 404) break;
-        } catch {}
-        await new Promise((res) => setTimeout(res, 500 * (i + 1)));
+      for (let round = 0; round < 2; round++) {
+        for (const s of sources) {
+          try {
+            const r = await (s.id === 'direct' && bypass && bypass.ready() ? bypass.fetch(s.url, { signal: AbortSignal.timeout(s.ms) }) : net.fetch(s.url, { signal: AbortSignal.timeout(s.ms) }));
+            if (r.ok) { imgBad.delete(s.id); return await save(r); }
+            if (r.status === 404 && s.id === 'direct') return new Response('', { status: 404 });
+            imgBad.set(s.id, Date.now() + 600000);
+          } catch { imgBad.set(s.id, Date.now() + 600000); }
+        }
+        await new Promise((res) => setTimeout(res, 600));
       }
     } finally { imgDone(); }
     return new Response('', { status: 502 });
   });
 }
 let win;
+let bypass = null;   // обход блокировки TMDB (bypass.js)
 
 // Тема плеера: стили и небольшой скрипт внедряются в страницу плеера сайта (embed), чтобы он выглядел как Luma.
 let themeCache = null;
@@ -86,11 +102,33 @@ function saveStore() {
 
 // ---------- сетевые запросы (без CORS) + кэш ----------
 const cache = new Map();
+// У сайта несколько зеркал API; в разных сетях отдельные узлы бывают сломаны (например, каталог отвечает, а поиск даёт 500).
+// Поэтому запрос идёт на последний рабочий узел, а при ошибке сервера пробуем остальные.
+const API_HOSTS = ['api.liftw.ws', 'api.embandr.ws', 'api.niteface.ws', 'api.faphz.com', 'api.lateremb.ws'];
+let apiHostI = 0;
+async function apiRequest(path, init = {}) {
+  let last;
+  for (let round = 0; round < 2; round++) {
+    for (let k = 0; k < API_HOSTS.length; k++) {
+      const i = (apiHostI + k) % API_HOSTS.length;
+      try {
+        const r = await fetch('https://' + API_HOSTS[i] + path, { ...init, signal: AbortSignal.timeout(12000) });
+        if (r.status >= 500 || r.status === 429) { last = new Error('HTTP ' + r.status); continue; }
+        const v = await r.json();
+        if (v && v.statusCode >= 500) { last = new Error('HTTP ' + v.statusCode); continue; }
+        apiHostI = i; return v;
+      } catch (e) { last = e; }
+    }
+    await new Promise((res) => setTimeout(res, 400));
+  }
+  throw last;
+}
 async function getJson(url, ttl = 120000) {
   const hit = cache.get(url);
   if (hit && Date.now() - hit.t < ttl) return hit.v;
-  const r = await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } });
-  const v = await r.json();
+  const v = url.startsWith(API + '/')
+    ? await apiRequest(url.slice(API.length), { headers: { 'User-Agent': UA, Accept: 'application/json' } })
+    : await (await fetch(url, { headers: { 'User-Agent': UA, Accept: 'application/json' } })).json();
   cache.set(url, { t: Date.now(), v });
   return v;
 }
@@ -99,12 +137,13 @@ async function getJson(url, ttl = 120000) {
 let findTrailers = () => [];
 
 const tmApi = require('./tmdb')({ ipcMain, safeStorage, getStore: () => store, saveStore, getJson, API });
+require('./diag')({ ipcMain, app, getStore: () => store, tm: tmApi });
 const updater = require('./updater')({ ipcMain, app, getWindow: () => win });
 const tvApi = require('./tv')({ ipcMain, app, protocol, net, dialog, getStore: () => store, saveStore, getWindow: () => win });
 findTrailers = require('./trailers')({ getJson, tm: tmApi }).findTrailers;
 const lbApi = require('./lb')({ ipcMain, safeStorage, getStore: () => store, saveStore, getJson, API, getMainWindow: () => win, tm: tmApi });
 
-require('./backup')({
+const backupApi = require('./backup')({
   ipcMain, app, getStore: () => store, saveStore, getWindow: () => win,
   secrets: {
     tmdb: { get: tmApi.getKey, set: tmApi.setKey },
@@ -113,10 +152,10 @@ require('./backup')({
     mdblist: { get: () => lbApi.getSecret('mdblist'), set: (v) => lbApi.setSecret('mdblist', v) }
   }
 });
+require('./sync')({ ipcMain, app, getWindow: () => win, backup: backupApi, reload: () => { if (win && !win.isDestroyed()) win.webContents.send('sync:applied'); } });
 
 ipcMain.handle('api:post', async (_e, p, body) => {
-  const r = await fetch(API + p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, body: JSON.stringify(body), signal: AbortSignal.timeout(15000) });
-  return r.json();
+  return apiRequest(p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, body: JSON.stringify(body) });
 });
 ipcMain.handle('api', (_e, p, ttl) => getJson(API + p, ttl));
 // Текущее время и длительность видео в плеере (читаем прямо из iframe: из чужой страницы ни время, ни события иначе не получить)
@@ -197,6 +236,20 @@ function migrateLegacyData() {
 }
 
 app.whenReady().then(() => {
+  try {
+    // сначала безопасный DNS (у системного DNS некоторых провайдеров TMDB подменён на 127.0.0.1), при сбое — обычный
+    app.configureHostResolver({ secureDnsMode: 'automatic', secureDnsServers: ['https://cloudflare-dns.com/dns-query', 'https://dns.google/dns-query'] });
+  } catch {}
+  // все запросы главного процесса идут через сетевой стек Chromium (он использует этот DNS и системный прокси)
+  const nodeFetch = globalThis.fetch;
+  bypass = require('./bypass')({ app, session });
+  bypass.start().catch((e) => { if (process.env.LUMA_DEBUG_BYPASS) console.log("[bypass] start failed", e); });
+  const hostOf = (u) => { try { return new URL(typeof u === 'string' ? u : u.url || String(u)).hostname; } catch { return ''; } };
+  globalThis.fetch = (u, o) => {
+    const viaBypass = bypass.ready() && bypass.isTmdb(hostOf(u));
+    if (process.env.LUMA_DEBUG_BYPASS && /tmdb|themoviedb/.test(hostOf(u))) console.log("[bypass] fetch", hostOf(u), viaBypass);
+    return (viaBypass ? bypass.fetch(u, o) : net.fetch(u, o)).catch((e) => { if (o && o.signal && o.signal.aborted) throw e; return nodeFetch(u, o); });
+  };
   setupImageProxy();
   tvApi.setupProxy();
   migrateLegacyData();

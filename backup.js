@@ -54,7 +54,11 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
       } else if (k === 'seen') {
         out.seen = { ...(cur.seen || {}) };
         for (const [sk, arr] of Object.entries(v || {})) out.seen[sk] = [...new Set([...(out.seen[sk] || []), ...arr])];
-      } else if (k === 'lbRecent') out.lbRecent = [...new Set([...(v || []), ...(cur.lbRecent || [])])].slice(0, 8);
+      } else if (k === 'tvFav') out.tvFav = [...new Set([...(cur.tvFav || []), ...(v || [])])];
+      else if (k === 'tvStats') { out.tvStats = { ...(cur.tvStats || {}) }; for (const [id, st] of Object.entries(v || {})) { const o = out.tvStats[id]; if (!o || (st.last || 0) > (o.last || 0)) out.tvStats[id] = { ...st, n: Math.max(st.n || 0, o ? o.n || 0 : 0), t: Math.max(st.t || 0, o ? o.t || 0 : 0) }; } }
+      else if (k === 'progress') { out.progress = { ...(cur.progress || {}) }; for (const [pk, pv] of Object.entries(v || {})) if (!out.progress[pk] || (pv.ts || 0) > (out.progress[pk].ts || 0)) out.progress[pk] = pv; }
+      else if (k === 'tvCustom') { const c = cur.tvCustom || []; out.tvCustom = [...c, ...(v || []).filter((e) => e && !c.some((x) => x.url && x.url === e.url))]; }
+      else if (k === 'lbRecent') out.lbRecent = [...new Set([...(v || []), ...(cur.lbRecent || [])])].slice(0, 8);
       else out[k] = v; // остальные настройки берём из копии
     }
     return out;
@@ -116,4 +120,16 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
     return { ok: true, summary: s };
   });
   ipcMain.handle('backup:cancel', () => { pending = null; return { ok: true }; });
+
+  // для синхронизации с ТВ: выгрузка данных и слияние присланных
+  function applyObj(obj) {
+    if (!valid(obj)) throw new Error('FORMAT');
+    const store = getStore(), merged = merge(store, obj.data);
+    for (const k of Object.keys(store)) delete store[k];
+    Object.assign(store, merged);
+    for (const [name, value] of Object.entries(obj.secrets || {})) if (secrets[name] && typeof value === 'string' && value) secrets[name].set(value);
+    saveStore();
+    return summary(obj);
+  }
+  return { collect, applyObj, seal: (plain, pw) => JSON.parse(seal(JSON.parse(plain), pw)), unseal: (file, pw) => JSON.stringify(unseal(file, pw)) };
 };

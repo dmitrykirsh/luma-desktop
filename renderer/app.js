@@ -81,7 +81,7 @@ function addHistory(it, season, episode) {
 /* ================= TMDB ================= */
 const tm = { has: false };
 const TMG = (p, s = 'w1280') => 'tmdbimg://image/t/p/' + s + p; // через прокси в main.js: очередь, повторы, кэш
-async function refreshTmdb() { try { tm.has = !!(await window.lift.tmdbStatus()).has; } catch { tm.has = false; } }
+async function refreshTmdb() { try { tm.has = !!(await window.lift.tmdbStatus()).has; } catch { tm.has = false; } try { tm.slow = !!(await window.lift.tmdbProxyGet()).url; } catch { tm.slow = false; } }
 
 /* ================= API ================= */
 const api = (p, ttl) => window.lift.api(p, ttl);
@@ -480,7 +480,7 @@ async function renderDetails(view, route, alive) {
   const pre = (src) => new Promise((res) => { if (!src) return res(''); const i = new Image(); i.onload = () => res(src); i.onerror = () => res(''); i.src = src; });
   let T = null, R = null, bdSrc = '', logoSrc = '';
   if (tm.has) {
-    T = await cap(window.lift.tmdbFind({ name: d.name, origin_name: d.origin_name || inf.name_eng, year: d.year, type: d.type }), 6000);
+    T = await cap(window.lift.tmdbFind({ name: d.name, origin_name: d.origin_name || inf.name_eng, year: d.year, type: d.type }), tm.slow ? 15000 : 6000);
     if (!alive()) return;
     if (T && (T.error || T.none)) { if (T.error) tmError(T.error); T = null; }
   }
@@ -489,7 +489,7 @@ async function renderDetails(view, route, alive) {
     T && T.backdrop ? pre(TMG(T.backdrop, 'w1280')) : '',
     T && T.logo ? pre(TMG(T.logo, 'w500')) : '',
     T ? window.lift.ratings({ kind: T.kind, tmdb: T.tmdb, imdb: T.imdb }).catch(() => null) : null
-  ]), 5000);
+  ]), tm.slow ? 12000 : 5000);
   if (!alive()) return;
   let posterOk = '';
   if (got) { [posterOk, bdSrc, logoSrc, R] = got; }
@@ -1087,6 +1087,7 @@ async function renderSettings(view) {
     ['Скопируйте ключ', 'Подойдёт любой из двух: «Ключ API» (короткий, 32 символа) или «Ключ доступа к API» (длинный, начинается с eyJ…).'],
     ['Вставьте ключ ниже и нажмите «Проверить и сохранить»', 'Приложение проверит его и запомнит на этом компьютере в зашифрованном виде.']
   ];
+  const tmProxyUrl = (await window.lift.tmdbProxyGet()).url || '';
   view.innerHTML = `<div class="page-head"><h1>Настройки</h1></div>
   <div class="set-wrap">
     <section class="set-card">
@@ -1099,6 +1100,19 @@ async function renderSettings(view) {
         ${tm.has ? '<button class="btn ghost" id="tmDel">Удалить ключ</button>' : ''}</div>
       <p class="hint" id="tmMsg"></p>
       <p class="hint">Если TMDB не открывается в вашей сети, понадобится VPN: подборки и кадры берутся напрямую с серверов TMDB. Сам каталог и просмотр от этого не зависят.</p>
+    </section>
+    <section class="set-card" id="tmProxyCard">
+      <div class="set-head"><div><h2>TMDB не открывается? Свой адрес-посредник</h2><p>Если провайдер блокирует TMDB, а VPN не хочется, можно бесплатно поднять посредника на Cloudflare Workers за пару минут. Luma будет обращаться к нему, а не к TMDB напрямую.</p></div>
+      <span class="status ${tmProxyUrl ? 'ok' : ''}" id="tpStatus">${tmProxyUrl ? 'Подключён' : 'Не используется'}</span></div>
+      <ol class="steps">
+        <li><i>1</i><div><b>Зарегистрируйтесь на Cloudflare</b><span>Бесплатный аккаунт на dash.cloudflare.com, карта не нужна.</span><button class="pill" data-ext="https://dash.cloudflare.com/sign-up">Открыть Cloudflare ↗</button></div></li>
+        <li><i>2</i><div><b>Создайте Worker</b><span>В меню слева: Compute (Workers) → Create → Create Worker. Любое имя, например luma-tmdb. Нажмите Deploy, затем Edit code.</span></div></li>
+        <li><i>3</i><div><b>Вставьте наш скрипт</b><span>Удалите весь код в редакторе, вставьте скопированный и нажмите Deploy.</span><button class="pill" id="tpCopy">Скопировать скрипт</button></div></li>
+        <li><i>4</i><div><b>Вставьте адрес Worker сюда</b><span>Адрес вида https://luma-tmdb.ваше-имя.workers.dev (он показан на странице Worker). Luma проверит его и запомнит.</span></div></li>
+      </ol>
+      <div class="key-row"><input id="tpUrl" placeholder="https://luma-tmdb.ваше-имя.workers.dev" value="${esc(tmProxyUrl)}" spellcheck="false" autocomplete="off"><button class="btn primary" id="tpSave">Проверить и сохранить</button>${tmProxyUrl ? '<button class="btn ghost" id="tpDel">Отключить</button>' : ''}</div>
+      <p class="hint" id="tpMsg"></p>
+      <p class="hint">Через посредника идут запросы к TMDB (в том числе ваш ключ), как через любой прокси. Скрипт ничего не хранит и пересылает только адреса TMDB.</p>
     </section>
     <section class="set-card">
       <div class="set-head"><div><h2>Rotten Tomatoes и Metacritic (по желанию)</h2><p>Оценки критиков берутся из бесплатного сервиса OMDb. Для рейтинга Letterboxd отдельный ключ не нужен, а вот для него и для оценок критиков нужен подключённый ключ TMDB. Без ключа OMDb страница фильма просто покажет меньше оценок.</p></div>
@@ -1114,6 +1128,17 @@ async function renderSettings(view) {
     </section>
     ${keyCardHTML('mdblist', ks.mdblist)}
     ${keyCardHTML('trakt', ks.trakt)}
+
+    <section class="set-card" id="diagCard">
+      <div class="set-head"><div><h2>Проверка связи</h2><p>Если что-то не грузится (поиск, кадры, рейтинги, трейлеры), нажмите кнопку: Luma проверит нужные сервисы и покажет отчёт, который можно скопировать и отправить. Ключи в отчёт не попадают.</p></div></div>
+      <div class="key-row"><button class="btn primary" id="dgRun">Проверить</button><button class="btn ghost" id="dgCopy" style="display:none">Скопировать отчёт</button></div>
+      <pre id="dgOut" class="hint" style="display:none;white-space:pre-wrap;user-select:text;margin-top:12px;font-size:13px;line-height:1.6"></pre>
+    </section>
+    <section class="set-card" id="tvSync">
+      <div class="set-head"><div><h2>Телевизор</h2><p>Синхронизация с Luma на ТВ в домашней сети: избранное, история, прогресс, подборки, каналы и ключи. Без облака и аккаунтов.</p></div></div>
+      <div class="key-row"><button class="btn primary" id="tvFind">Найти телевизор</button></div>
+      <div id="tvList" class="bk-box" style="display:none"></div>
+    </section>
     <section class="set-card" id="bkCard">
       <div class="set-head"><div><h2>Резервная копия</h2><p>Один файл с избранным, историей просмотров, подборками, прогрессом по сериям, настройками и всеми ключами (TMDB, OMDb, MDBList, Trakt). После переустановки или на другом компьютере достаточно импортировать этот файл.</p></div></div>
       <div class="key-row"><button class="btn primary" id="bkExp">Экспорт…</button><button class="btn ghost" id="bkImp">Импорт…</button></div>
@@ -1140,6 +1165,41 @@ async function renderSettings(view) {
   };
   inp.onkeydown = (e) => { if (e.key === 'Enter') $('#tmSave').click(); };
   $('#tmDel') && ($('#tmDel').onclick = async () => { await window.lift.tmdbClear(); toast('Ключ удалён'); renderSettings($('#view')); });
+  const TP_SCRIPT = `// Прокси TMDB для Luma на Cloudflare Workers.
+// Нужен тем, у кого провайдер блокирует api.themoviedb.org и image.tmdb.org.
+// Пересылает только два адреса: /3/... на API TMDB и /img/... на картинки. Ничего не хранит и не логирует.
+export default {
+  async fetch(req) {
+    const u = new URL(req.url);
+    const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': '*' };
+    if (req.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+    if (req.method !== 'GET') return new Response('method not allowed', { status: 405, headers: cors });
+    if (u.pathname === '/ping') return Response.json({ app: 'luma-tmdb-proxy', ok: true }, { headers: cors });
+    if (u.pathname === '/') return Response.json({ app: 'luma-tmdb-proxy', ok: true }, { headers: cors });
+    let target = '';
+    if (u.pathname.startsWith('/3/')) target = 'https://api.themoviedb.org' + u.pathname + u.search;
+    else if (u.pathname.startsWith('/img/')) target = 'https://image.tmdb.org' + u.pathname.slice(4);
+    else return new Response('not found', { status: 404, headers: cors });
+    const h = new Headers();
+    h.set('Accept', req.headers.get('Accept') ?? '*/*');
+    const auth = req.headers.get('Authorization');
+    if (auth) h.set('Authorization', auth);
+    const r = await fetch(target, { headers: h });
+    const out = new Response(r.body, r);
+    out.headers.set('Access-Control-Allow-Origin', '*');
+    return out;
+  }
+};
+`;
+  $('#tpCopy').onclick = async () => { try { await navigator.clipboard.writeText(TP_SCRIPT); toast('Скрипт скопирован'); } catch { toast('Не получилось скопировать'); } };
+  $('#tpSave').onclick = async () => {
+    const m = $('#tpMsg'); m.className = 'hint'; m.textContent = 'Проверяю адрес…';
+    const r = await window.lift.tmdbProxySet($('#tpUrl').value);
+    if (r.ok) { toast(r.url ? 'Посредник подключён' : 'Посредник отключён'); renderSettings($('#view')); return; }
+    m.className = 'hint bad';
+    m.textContent = { FORMAT: 'Нужен адрес вида https://имя.workers.dev', NOT_PROXY: 'По этому адресу отвечает не наш скрипт: проверьте, что вставили код целиком и нажали Deploy', NETWORK: 'Адрес не открылся. Проверьте его и попробуйте ещё раз' }[r.error] || 'Не получилось';
+  };
+  $('#tpDel') && ($('#tpDel').onclick = async () => { await window.lift.tmdbProxySet(''); toast('Посредник отключён'); renderSettings($('#view')); });
   const omMsg = $('#omMsg'), omIn = $('#omKey');
   $('#omSave').onclick = async () => {
     const v = omIn.value.trim(); if (!v) { omMsg.textContent = 'Вставьте ключ в поле выше'; omMsg.className = 'hint bad'; return; }
@@ -1155,6 +1215,13 @@ async function renderSettings(view) {
   $('#aboutLogo').innerHTML = window.lumaLogo({ height: 40 });
   window.lift.appInfo().then((i) => { const el = $('#aboutVer'); if (el) el.textContent = 'Luma · версия ' + i.version; });
   wireBackup();
+  wireTvSync();
+  $('#dgRun').onclick = async () => {
+    const b = $('#dgRun'), out = $('#dgOut'); b.disabled = true; b.textContent = 'Проверяем…'; out.style.display = ''; out.textContent = 'Это займёт до 15 секунд…';
+    const r = await window.lift.diagRun().catch(() => ({ text: 'Проверка не удалась' }));
+    out.textContent = r.text; b.disabled = false; b.textContent = 'Проверить ещё раз'; $('#dgCopy').style.display = '';
+  };
+  $('#dgCopy').onclick = async () => { try { await navigator.clipboard.writeText($('#dgOut').textContent); toast('Отчёт скопирован'); } catch { toast('Не получилось скопировать'); } };
   paintUpdateCard();
   $('#clrHist').onclick = () => { state.history = []; persist('history'); toast('История очищена'); renderSettings($('#view')); };
   $('#clrFav').onclick = () => { state.favs = []; persist('favs'); updateBadges(); toast('Избранное очищено'); renderSettings($('#view')); };
@@ -1324,3 +1391,40 @@ window.lift.onWinState((s) => {
   go({ name: 'home' });
   setTimeout(() => $('#splash').classList.add('gone'), 900);
 })();
+
+
+/* ================= синхронизация с ТВ ================= */
+function wireTvSync() {
+  const list = $('#tvList'), btn = $('#tvFind'); if (!btn) return;
+  const show = (html) => { list.style.display = ''; list.innerHTML = html; };
+  const ERR = { BAD_CODE: 'Код не подошёл: введите код с экрана ТВ.', NETWORK: 'Не получилось связаться с ТВ. Он должен быть включён, а Luma TV открыта на экране Настройки → Синхронизация.', FORMAT: 'Код состоит из 4 цифр.', TIMEOUT: 'ТВ не ответил вовремя.', ERR: 'Не получилось синхронизировать.' };
+  btn.onclick = async () => {
+    btn.disabled = true; show('<div class="spin"></div>');
+    const tvs = await window.lift.syncScan(); btn.disabled = false;
+    if (!tvs.length) { show('<p class="hint">Телевизоры не нашлись. На ТВ откройте Luma → Настройки → Синхронизация и нажмите «Найти телевизор» ещё раз.</p>'); return; }
+    show(tvs.map((t, i) => `<div class="key-row" style="margin:6px 0"><b style="min-width:200px">${esc(t.name || 'Телевизор')} <small class="hint">${esc(t.ip)}</small></b><input class="tvcode" data-i="${i}" inputmode="numeric" maxlength="4" placeholder="Код с ТВ" style="width:130px"><button class="btn primary tvgo" data-i="${i}">Синхронизировать</button></div>`).join('') + '<p class="hint" id="tvMsg">Введите 4-значный код, который показан на экране ТВ.</p>');
+    $$('.tvgo', list).forEach((b) => b.onclick = async () => {
+      const t = tvs[+b.dataset.i], code = $(`.tvcode[data-i="${b.dataset.i}"]`, list).value;
+      const m = $('#tvMsg'); m.className = 'hint'; m.textContent = 'Синхронизируем…'; b.disabled = true;
+      const r = await window.lift.syncPush({ ip: t.ip, port: t.port, code }); b.disabled = false;
+      if (r.ok) { await initStore(); await refreshTmdb(); updateBadges(); m.textContent = 'Готово: данные объединены с «' + (r.name || 'ТВ') + '».'; toast('Синхронизация с ТВ завершена'); }
+      else { m.className = 'hint bad'; m.textContent = ERR[r.error] || ERR.ERR; }
+    });
+  };
+}
+// ТВ нашёл этот компьютер и прислал данные: спрашиваем код с экрана ТВ
+window.lift.onSyncRequest(() => {
+  $('#tvAsk')?.remove();
+  document.body.insertAdjacentHTML('beforeend', `<div id="tvAsk" style="position:fixed;inset:0;z-index:9999;background:rgba(5,6,8,.7);display:grid;place-items:center"><div class="set-card" style="width:420px;margin:0"><div class="set-head"><div><h2>Телевизор хочет синхронизироваться</h2><p>Введите код, показанный на экране ТВ.</p></div></div>
+    <div class="key-row"><input id="tvAskCode" inputmode="numeric" maxlength="4" placeholder="Код" style="width:140px"><button class="btn primary" id="tvAskOk">Подтвердить</button><button class="btn ghost" id="tvAskNo">Отклонить</button></div><p class="hint" id="tvAskMsg"></p></div></div>`);
+  $('#tvAskCode').focus();
+  const go = async () => {
+    const r = await window.lift.syncCode($('#tvAskCode').value);
+    if (r.ok) { $('#tvAsk')?.remove(); await initStore(); await refreshTmdb(); updateBadges(); toast('Синхронизация с ТВ завершена'); if (currentRoute?.name === 'settings') renderSettings($('#view')); }
+    else { $('#tvAskMsg').className = 'hint bad'; $('#tvAskMsg').textContent = r.error === 'TOO_MANY' ? 'Слишком много попыток.' : 'Код не подошёл.'; if (r.error === 'TOO_MANY') setTimeout(() => $('#tvAsk')?.remove(), 1500); }
+  };
+  $('#tvAskOk').onclick = go; $('#tvAskCode').onkeydown = (e) => { if (e.key === 'Enter') go(); };
+  $('#tvAskNo').onclick = () => { window.lift.syncCancel(); $('#tvAsk')?.remove(); };
+});
+window.lift.onSyncRequestEnd(() => $('#tvAsk')?.remove());
+window.lift.onSyncApplied(async () => { await initStore(); await refreshTmdb(); updateBadges(); });

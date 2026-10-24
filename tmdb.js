@@ -6,6 +6,7 @@ const MOVIE_TYPES = [1, 2, 6];
 
 module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, getJson, API }) {
   const mem = new Map();
+  let directBadUntil = 0;   // до этого времени прямой путь к TMDB считаем неработающим
   const missed = new Map(); // кэш «не нашли в Luma» (только на время сессии)
 
   /* ---------- ключ ---------- */
@@ -29,16 +30,31 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
   async function tmdb(path, params = {}, ttl = 3600000, keyOverride) {
     const key = keyOverride || getKey();
     if (!key) throw Object.assign(new Error('NO_KEY'), { code: 'NO_KEY' });
-    const u = new URL(TMDB_API + path);
-    u.searchParams.set('language', 'ru-RU');
-    for (const [k, v] of Object.entries(params)) u.searchParams.set(k, v);
+    const px = String(getStore().tmdbProxy || '').replace(/\/+$/, '');
+    const params2 = { language: 'ru-RU', ...params };
+    const build = (base) => { const u = new URL(base + path); for (const [k, v] of Object.entries(params2)) u.searchParams.set(k, v); return u; };
     const headers = { Accept: 'application/json' };
     const bearer = key.startsWith('eyJ');
-    if (bearer) headers.Authorization = 'Bearer ' + key; else u.searchParams.set('api_key', key);
-    const ck = u.toString() + (bearer ? '#b' : '');
+    if (bearer) headers.Authorization = 'Bearer ' + key;
+    const keyed = (u) => { if (!bearer) u.searchParams.set('api_key', key); return u; };
+    const ck = build(TMDB_API).toString() + (bearer ? '#b' : '');
     const hit = mem.get(ck);
     if (hit && Date.now() - hit.t < ttl) return hit.v;
-    const r = await fetch(u, { headers, signal: AbortSignal.timeout(12000) });
+    // Прямой путь быстрее, поэтому идём сначала им. Посредник (если задан) — запасной: к нему переключаемся,
+    // когда напрямую не отвечает, и на 10 минут запоминаем, что напрямую недоступно.
+    const routes = [{ u: () => keyed(build(TMDB_API)), ms: px ? 6000 : 12000, direct: true }];
+    if (px) routes.push({ u: () => keyed(build(px + '/3')), ms: 15000, direct: false });
+    if (px && Date.now() < directBadUntil) routes.reverse();
+    let r, lastErr;
+    for (const rt of routes) {
+      try {
+        r = await fetch(rt.u(), { headers, signal: AbortSignal.timeout(rt.ms) });
+        if (r.status >= 500) { lastErr = new Error('HTTP ' + r.status); r = null; continue; }
+        if (rt.direct) directBadUntil = 0; else if (routes[0].direct === false) { /* посредник был первым */ } else directBadUntil = Date.now() + 600000;
+        break;
+      } catch (e) { lastErr = e; r = null; if (rt.direct) directBadUntil = Date.now() + 600000; }
+    }
+    if (!r) throw lastErr;
     if (r.status === 401) throw Object.assign(new Error('BAD_KEY'), { code: 'BAD_KEY' });
     if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), { code: 'HTTP' });
     const v = await r.json();
@@ -102,6 +118,20 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
     try { await tmdb('/configuration', {}, 0, key); } catch (e) { return errCode(e); }
     setKey(key);
     return { ok: true };
+  });
+  // свой адрес-посредник (Cloudflare Worker) для сетей, где TMDB заблокирован
+  ipcMain.handle('tmdb:proxy-get', () => ({ url: getStore().tmdbProxy || '' }));
+  ipcMain.handle('tmdb:proxy-set', async (_e, raw) => {
+    let url = String(raw || '').trim().replace(/\/+$/, '');
+    if (!url) { delete getStore().tmdbProxy; saveStore(); mem.clear(); return { ok: true, url: '' }; }
+    if (!/^https:\/\/[\w.-]+(:\d+)?$/i.test(url)) return { error: 'FORMAT' };
+    try {
+      const r = await fetch(url + '/ping', { signal: AbortSignal.timeout(10000) });
+      const j = await r.json();
+      if (!j || j.app !== 'luma-tmdb-proxy') return { error: 'NOT_PROXY' };
+    } catch { return { error: 'NETWORK' }; }
+    getStore().tmdbProxy = url; saveStore(); mem.clear();
+    return { ok: true, url };
   });
   ipcMain.handle('tmdb:clear', () => { setKey(''); return { ok: true }; });
 
