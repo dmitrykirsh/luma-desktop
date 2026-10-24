@@ -1,0 +1,75 @@
+/* Тема плеера Luma. Внедряется в страницу плеера (embed) из main.js.
+   Классы у плеера «хэшированные» (center-left_1ro), поэтому везде префиксные селекторы [class*="center-left_"]. */
+:root{--l-bg:#0B0C10;--l-surface:#181A20;--l-rose:#FF3366;--l-gold:#FFB800;--l-text:#F8F9FA;--l-muted:#8E95A5;--l-ease:cubic-bezier(.22,1,.36,1)}
+html,body{background:#000}
+#player,#player *{font-family:'Inter','Segoe UI',system-ui,sans-serif}
+
+/* --- большая кнопка Play/Pause строго по центру; значки рисуем сами, чтобы они были ровно по центру --- */
+:root{--l-ico-play:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill='%23F8F9FA' d='M8.6 4.9v14.2c0 .9 1 1.5 1.8.9l10.3-7.1c.7-.5.7-1.4 0-1.9L10.4 4c-.8-.6-1.8 0-1.8.9z'/%3E%3C/svg%3E");--l-ico-pause:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='6' y='4.5' width='4.4' height='15' rx='1.5' fill='%23F8F9FA'/%3E%3Crect x='13.6' y='4.5' width='4.4' height='15' rx='1.5' fill='%23F8F9FA'/%3E%3C/svg%3E")}
+[class*="playWrapper_"] [class*="center-left_"]{left:50%!important;top:50%!important;right:auto!important;bottom:auto!important;transform:translate(-50%,-50%)!important;width:104px!important;height:104px!important}
+[class*="playWrapper_"] [class*="center-left_"] button{width:104px!important;height:104px!important;border-radius:50%!important;
+  background-color:rgba(24,26,32,.58)!important;background-image:var(--l-ico-pause)!important;background-repeat:no-repeat!important;background-position:center!important;background-size:44px 44px!important;
+  backdrop-filter:blur(18px) saturate(1.5);border:1px solid rgba(248,249,250,.18);box-shadow:0 18px 50px rgba(0,0,0,.55);padding:0;
+  transition:transform .4s var(--l-ease),background-color .25s,box-shadow .3s!important;animation:luma-pop .55s var(--l-ease) both,luma-pulse 2.6s ease-in-out .7s infinite}
+[class*="player-paused"] [class*="playWrapper_"] [class*="center-left_"] button{background-image:var(--l-ico-play)!important;background-size:50px 50px!important}
+[class*="playWrapper_"] [class*="center-left_"] button svg{display:none!important}
+[class*="playWrapper_"] [class*="center-left_"] button:hover{background-color:var(--l-rose)!important;transform:scale(1.1);box-shadow:0 18px 64px rgba(255,51,102,.6);animation:none}
+[class*="playWrapper_"] [class*="center-left_"] button:active{transform:scale(.95)}
+@keyframes luma-pop{from{opacity:0;transform:scale(.55)}to{opacity:1;transform:scale(1)}}
+@keyframes luma-pulse{50%{box-shadow:0 18px 50px rgba(0,0,0,.55),0 0 0 16px rgba(255,51,102,.14)}}
+[class*="center-left_"] [class*="tooltip_"]{display:none!important}
+
+/* --- затемнение под панелями управления: видно только пока интерфейс активен --- */
+[class*="controls_"]::before,[class*="controls_"]::after{content:"";position:absolute;left:0;right:0;pointer-events:none;opacity:0;transition:opacity .45s;z-index:0}
+[class*="controls_"]::before{bottom:0;height:220px;background:linear-gradient(0deg,rgba(11,12,16,.92),rgba(11,12,16,.5) 50%,transparent)}
+[class*="controls_"]::after{top:0;height:130px;background:linear-gradient(180deg,rgba(11,12,16,.7),transparent)}
+html.luma-active [class*="controls_"]::before,html.luma-active [class*="controls_"]::after{opacity:1}
+[class*="controls_"]>*{z-index:1}
+
+/* --- кнопки управления --- */
+[class*="controls_"] button[class*="icon_"]{border-radius:50%!important;transition:background .2s,transform .3s var(--l-ease)!important}
+[class*="controls_"] button[class*="icon_"]:hover{background:rgba(248,249,250,.14)!important;transform:scale(1.12)}
+[class*="controls_"] button[class*="icon_"]:active{transform:scale(.92)}
+[class*="controls_"] svg path{fill:var(--l-text)}
+[class*="bottom-left_"] [class*="time_"]{font:500 13px 'Inter',sans-serif!important;font-variant-numeric:tabular-nums;letter-spacing:.02em;color:var(--l-text);text-shadow:none!important;opacity:.92}
+
+/* --- таймлайн: золотой прогресс, растёт при наведении --- */
+[class*="timeline_"] [class*="wrap_"]{cursor:pointer}
+[class*="timeline_"] [class*="rail_"],[class*="timeline_"] [class*="buffer_"],[class*="timeline_"] [class*="progress_"]{top:auto!important;bottom:0!important;height:4px!important;border-radius:0 3px 3px 0;transition:height .22s var(--l-ease)!important}
+[class*="timeline_"]:hover [class*="rail_"],[class*="timeline_"]:hover [class*="buffer_"],[class*="timeline_"]:hover [class*="progress_"]{height:8px!important}
+[class*="timeline_"] [class*="rail_"]{background:rgba(248,249,250,.2)!important}
+[class*="timeline_"] [class*="buffer_"]{background:rgba(248,249,250,.3)!important}
+[class*="timeline_"] [class*="progress_"]{background:var(--l-gold)!important;box-shadow:0 0 14px rgba(255,184,0,.55);overflow:visible;position:absolute}
+[class*="timeline_"] [class*="progress_"]:not([class*="hidden_"])::after{content:"";position:absolute;right:-7px;top:50%;width:14px;height:14px;margin-top:-7px;border-radius:50%;background:var(--l-gold);box-shadow:0 0 0 3px rgba(255,184,0,.28);transform:scale(0);transition:transform .25s var(--l-ease)}
+[class*="timeline_"]:hover [class*="progress_"]::after{transform:scale(1)}
+[class*="timeline_"] [class*="thumbnail_"]{border-radius:10px;border:1px solid rgba(248,249,250,.14);box-shadow:0 12px 36px rgba(0,0,0,.55)}
+
+/* --- подсказки --- */
+[class*="tooltip_"] [class*="text_"]{background:rgba(24,26,32,.94)!important;border:1px solid rgba(248,249,250,.1);border-radius:10px!important;font:500 12.5px 'Inter',sans-serif!important;padding:7px 11px!important;color:var(--l-text);backdrop-filter:blur(12px);box-shadow:0 10px 30px rgba(0,0,0,.45)}
+
+/* --- бейдж качества и загрузка --- */
+[class*="quality_"]{background:var(--l-rose)!important;color:#fff!important;border-radius:4px}
+[class*="quality_"] svg path{fill:#fff}
+[class*="blob_"]{background:var(--l-rose)!important}
+[class*="blob_"]:nth-child(2){background:var(--l-gold)!important}
+
+/* --- меню (настройки, серии) --- */
+[class*="menu_"][class*="right_"]{background:rgba(24,26,32,.94)!important;backdrop-filter:blur(28px) saturate(1.4);border-left:1px solid rgba(248,249,250,.09);border-radius:22px 0 0 22px;box-shadow:-30px 0 90px rgba(0,0,0,.55);animation:luma-slide .42s var(--l-ease) both}
+@keyframes luma-slide{from{opacity:0;transform:translateX(40px)}to{opacity:1;transform:none}}
+[class*="menu_"] [class*="title_"]{font:600 15px 'Inter',sans-serif;color:var(--l-text)}
+[class*="menu_"] [class*="muted_"]{color:var(--l-muted)!important}
+[class*="menu_"] [class*="value_"]{color:var(--l-muted);font-weight:500}
+[class*="menu_"] [class*="header_"]{font-weight:600}
+[class*="menu_"] [class*="divider_"]{border-color:rgba(248,249,250,.09)!important}
+[class*="menu_"] [class*="bgFill_"]{transition:background .18s}
+[class*="menu_"] [class*="bgFill_"]:hover{background:rgba(248,249,250,.08)!important}
+[class*="menu_"] li[class*="item_"][class*="active_"],[class*="menu_"] li[class*="episode_"][class*="active_"]{color:var(--l-rose)!important;font-weight:600}
+[class*="menu_"] li[class*="item_"][class*="active_"] svg path,[class*="menu_"] li[class*="item_"][class*="active_"] svg{fill:var(--l-rose)!important;stroke:var(--l-rose)}
+[class*="menu_"][class*="center_"]{background:rgba(11,12,16,.7)!important;backdrop-filter:blur(8px)}
+[class*="error_"] [class*="caption_"]{font-weight:600}
+
+/* --- анимация нажатия Play/Pause в центре --- */
+.luma-fb{position:fixed;left:50%;top:50%;width:92px;height:92px;margin:-46px 0 0 -46px;border-radius:50%;background:rgba(24,26,32,.62);backdrop-filter:blur(16px);border:1px solid rgba(248,249,250,.18);display:grid;place-items:center;pointer-events:none;opacity:0;z-index:50}
+.luma-fb svg{width:40px;height:40px;fill:var(--l-text)}
+.luma-fb.go{animation:luma-fb .7s var(--l-ease)}
+@keyframes luma-fb{0%{opacity:0;transform:scale(.6)}28%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.4)}}

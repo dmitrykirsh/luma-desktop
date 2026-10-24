@@ -1,0 +1,19 @@
+/* ===== Обновления ===== */
+#updBanner{position:fixed;left:96px;bottom:22px;z-index:110;display:flex;align-items:center;gap:14px;padding:12px 14px 12px 16px;max-width:460px;border-radius:18px;background:rgba(24,26,32,.97);backdrop-filter:blur(20px);border:1px solid rgba(255,184,0,.35);box-shadow:0 20px 60px rgba(0,0,0,.6);animation:ubIn .55s var(--ease) both}
+@keyframes ubIn{from{opacity:0;transform:translateY(20px) scale(.97)}}
+.ub-ico{width:38px;height:38px;border-radius:12px;display:grid;place-items:center;background:rgba(255,184,0,.14);color:var(--accent);flex:none}
+.ub-ico svg{width:20px;height:20px}
+.ub-t{display:flex;flex-direction:column;min-width:0}
+.ub-t b{font-weight:600;font-size:14px}
+.ub-t span{color:var(--muted);font-size:12.5px;margin-top:2px}
+#updBanner .btn{height:38px;padding:0 16px;font-size:13.5px;flex:none}
+.ub-x{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;color:var(--muted);flex:none;transition:.2s}
+.ub-x:hover{background:rgba(248,249,250,.1);color:var(--text)}
+.ub-x svg{width:15px;height:15px}
+.upd-row{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-top:18px}
+.upd-main{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px}
+.upd-main b{font:600 15px var(--font-body)}
+.upd-notes{white-space:pre-wrap;font:400 13px/1.55 var(--font-body);color:var(--muted);background:var(--bg);border:1px solid var(--line);border-radius:14px;padding:14px 16px;max-height:220px;overflow:auto;-webkit-user-select:text;user-select:text}
+.upd-bar{height:6px;border-radius:6px;background:rgba(248,249,250,.12);overflow:hidden;max-width:420px}
+.upd-bar i{display:block;height:100%;background:var(--accent);border-radius:6px;transition:width .3s}
+body.has-update .nav[data-nav=settings]::after{content:"";position:absolute;left:34px;top:9px;width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 3px rgba(11,12,16,.9)}

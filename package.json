@@ -1,0 +1,67 @@
+{
+  "name": "luma-desktop",
+  "productName": "Luma",
+  "version": "2.5.0",
+  "description": "Luma — кинотеатр для Windows. Включи свою историю",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win nsis --publish never",
+    "pack": "electron-builder --win --dir"
+  },
+  "build": {
+    "appId": "ws.liftw.desktop",
+    "productName": "Luma",
+    "files": [
+      "main.js",
+      "preload.js",
+      "tmdb.js",
+      "lb.js",
+      "lbwin-preload.js",
+      "renderer/**/*",
+      "package.json",
+      "backup.js",
+      "trailers.js",
+      "playertheme/**/*",
+      "tv.js",
+      "updater.js"
+    ],
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Luma",
+      "language": "1049",
+      "artifactName": "Luma-Setup-${version}.exe",
+      "deleteAppDataOnUninstall": false
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "dmitrykirsh",
+        "repo": "luma-desktop"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dmitrykirsh/luma-desktop.git"
+  },
+  "homepage": "https://github.com/dmitrykirsh/luma-desktop",
+  "author": "dmitrykirsh"
+}

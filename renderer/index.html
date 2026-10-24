@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: tmdbimg:; style-src 'self' 'unsafe-inline'; frame-src https:; script-src 'self'; connect-src 'self' lumatv:; media-src 'self' blob: lumatv: https:; worker-src 'self' blob:">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Luma</title>
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="stylesheet" href="fonts.css">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="tv.css">
+<link rel="stylesheet" href="rates.css">
+<link rel="stylesheet" href="update.css">
+</head>
+<body>
+<div id="splash"><div class="splash-in"><div id="splashLogo"></div><p>Включи свою историю</p></div></div>
+
+<div id="bg"><div class="bg-img"></div><div class="bg-shade"></div></div>
+
+<header id="titlebar">
+  <div class="tb-left">
+    <button class="tb-btn" id="btnBack" title="Назад (Alt+←)" disabled><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <button class="tb-btn" id="btnFwd" title="Вперёд (Alt+→)" disabled><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button>
+  </div>
+  <button id="searchPill"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>Поиск фильмов и сериалов</span><kbd>Ctrl K</kbd></button>
+  <div class="tb-right">
+    <button class="win-btn" data-win="min"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
+    <button class="win-btn" data-win="max"><svg viewBox="0 0 10 10" id="maxIcon" class="max-icon"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
+    <button class="win-btn close" data-win="close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></button>
+  </div>
+</header>
+
+<nav id="sidebar">
+  <div class="logo" id="logoSlot"></div>
+  <div class="nav-group" id="navMain"></div>
+  <div class="nav-sep"></div>
+  <div class="nav-group" id="navLib"></div>
+</nav>
+
+<main id="main"><div id="view"></div></main>
+
+<div id="palette" class="hidden">
+  <div class="pal-back"></div>
+  <div class="pal-box">
+    <div class="pal-input"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><input id="palInput" placeholder="Название фильма или сериала…" autocomplete="off" spellcheck="false"><kbd>Esc</kbd></div>
+    <div id="palResults"></div>
+  </div>
+</div>
+
+<div id="player" class="hidden">
+  <div class="pl-bar">
+    <button class="pl-btn" id="plClose" title="Закрыть (Esc)"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+    <div class="pl-title"><b id="plTitle"></b><span id="plSub"></span></div>
+    <div class="pl-eps" id="plEps"></div>
+    <button class="pl-btn" id="plFs" title="Полный экран (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    <div class="pl-win">
+      <button class="win-btn" data-win="min" title="Свернуть"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
+      <button class="win-btn" data-win="max" title="Развернуть"><svg viewBox="0 0 10 10" class="max-icon"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
+      <button class="win-btn close" data-win="close" title="Закрыть Luma"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></button>
+    </div>
+  </div>
+  <div class="pl-hot" id="plHot"></div>
+  <div class="pl-pk-back hidden" id="plPkBack"></div>
+  <div class="pl-picker hidden" id="plPicker"></div>
+  <iframe id="plFrame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+  <div class="pl-loader"><div class="pl-logo" id="plLogo"></div></div>
+</div>
+
+<div id="trailerModal" class="hidden">
+  <div class="tm-back"></div>
+  <div class="tm-box"><button class="tm-x" id="tmClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button><iframe id="tmFrame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+</div>
+
+<div id="lightbox" class="hidden"><button class="lb-nav l" id="lbPrev"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button><img id="lbImg" alt=""><button class="lb-nav r" id="lbNext"><svg viewBox="0 0 24 24"><path d="M9 5l7 7-7 7"/></svg></button><span id="lbCount"></span></div>
+
+<div id="tvPl" class="hidden"><div id="tvPlBox"></div></div>
+
+<div id="updBanner" class="hidden"></div>
+<div id="toasts"></div>
+<script src="logo.js"></script>
+<script src="brands.js"></script>
+<script src="vendor/hls.min.js"></script>
+<script src="app.js"></script>
+<script src="tv.js"></script>
+<script src="update.js"></script>
+</body>
+</html>
