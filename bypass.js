@@ -8,6 +8,13 @@ const net = require('net');
 const dns = require('dns');
 
 const HOSTS = ['api.themoviedb.org', 'api.tmdb.org', 'image.tmdb.org', 'www.themoviedb.org', 'themoviedb.org'];
+// Известные настоящие адреса TMDB (CloudFront), последний резерв, если DNS отдаёт только пустые адреса.
+// Соединение идёт на адрес, а имя сайта передаётся в TLS, поэтому сертификат и сервер подходят.
+const KNOWN = {
+  'api.themoviedb.org': ['3.173.161.8', '3.173.161.20', '3.173.161.61', '3.173.161.72', '99.84.152.8', '99.84.152.32', '99.84.152.53', '99.84.152.85'],
+  'api.tmdb.org': ['54.192.100.17', '54.192.100.25', '54.192.100.57', '54.192.100.75'],
+  'image.tmdb.org': ['3.174.113.17', '3.174.113.43', '3.174.113.59', '3.174.113.60']
+};
 const isTmdb = (host) => HOSTS.includes(String(host).toLowerCase());
 
 module.exports = function initBypass({ app, session }) {
@@ -29,9 +36,12 @@ module.exports = function initBypass({ app, session }) {
   async function resolve(host) {
     const c = cache.get(host);
     if (c && c.until > Date.now()) return c.ips;
+    // TMDB отдаёт российским DNS «пустой» адрес 127.0.0.1 (включая DNS-over-HTTPS), поэтому настоящие адреса
+    // берём из системного DNS, затем из защищённого, а если и они пустые, из встроенного списка (CloudFront, куда ведёт TMDB).
     let ips = [];
     try { const r = await Promise.race([dns.promises.lookup(host, { all: true, family: 4 }), new Promise((_, no) => setTimeout(no, 4000))]); ips = r.map((x) => x.address).filter((x) => !bad(x)); } catch {}
     if (!ips.length) ips = await doh(host);
+    if (!ips.length) ips = KNOWN[host] || [];
     cache.set(host, { ips, until: Date.now() + 300000 });
     return ips;
   }

@@ -42,6 +42,7 @@ function setupImageProxy() {
     const sources = [
       { id: 'direct', url: 'https://image.tmdb.org' + u.pathname, ms: 6000 },
       ...(px ? [{ id: 'proxy', url: px + '/img' + u.pathname, ms: 8000 }] : []),
+      { id: 'cub', url: 'https://imagetmdb.cub.black' + u.pathname, ms: 8000 },   // зеркало картинок TMDB проекта Lampa (ключ в запросе картинок не передаётся)
       { id: 'wsrv', url: 'https://wsrv.nl/?url=' + encodeURIComponent('image.tmdb.org' + u.pathname), ms: 10000 },
       { id: 'weserv', url: 'https://images.weserv.nl/?url=' + encodeURIComponent('image.tmdb.org' + u.pathname), ms: 10000 }
     ];

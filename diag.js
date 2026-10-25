@@ -30,6 +30,14 @@ module.exports = function initDiag({ ipcMain, app, getStore, tm }) {
     }));
     lines.sort((a, b) => (a.startsWith('Luma') ? -1 : b.startsWith('Luma') ? 1 : 0));
 
+    // DNS: что отвечает системный DNS и что защищённый. 127.0.0.1 в ответе значит, что настоящий адрес из этой сети не отдают.
+    for (const host of ['api.themoviedb.org', 'image.tmdb.org']) {
+      let sys = '—', dohA = '—';
+      try { const r = await Promise.race([require('dns').promises.lookup(host, { all: true, family: 4 }), new Promise((_, no) => setTimeout(() => no(new Error('таймаут')), 5000))]); sys = r.map((x) => x.address).join(', '); } catch (e) { sys = 'ошибка (' + (e.code || e.message) + ')'; }
+      try { const j = await (await fetch('https://cloudflare-dns.com/dns-query?name=' + host + '&type=A', { headers: { accept: 'application/dns-json' }, signal: AbortSignal.timeout(6000) })).json(); dohA = (j.Answer || []).filter((a) => a.type === 1).map((a) => a.data).join(', ') || 'нет ответа'; } catch (e) { dohA = 'недоступен'; }
+      const same = sys.split(', ').some((x) => dohA.includes(x));
+      lines.push(`${same ? '✓' : '✗'} DNS ${host}: системный ${sys} | защищённый ${dohA}${same ? '' : '  ← защищённый DNS отдаёт не тот адрес (127.0.0.1 значит, что TMDB не отдаёт настоящий адрес из России)'}`);
+    }
     // TMDB напрямую: «неверный ключ» (401) значит, что сервер достижим
     add('TMDB, API напрямую', await probe('https://api.themoviedb.org/3/configuration?api_key=x', [200, 401]));
     add('TMDB, картинки напрямую', await probe('https://image.tmdb.org/t/p/w92/hZkgoQYus5vegHoetLkCJzb17zJ.jpg', [200]));
