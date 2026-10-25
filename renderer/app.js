@@ -478,22 +478,25 @@ async function renderDetails(view, route, alive) {
   // Дожидаемся TMDB (фон, логотип, кадры, рейтинги) и картинок, чтобы показать страницу сразу в финальном виде
   const cap = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
   const pre = (src) => new Promise((res) => { if (!src) return res(''); const i = new Image(); i.onload = () => res(src); i.onerror = () => res(''); i.src = src; });
-  let T = null, R = null, bdSrc = '', logoSrc = '';
+  let T = null, R = null, bdSrc = '', logoSrc = '', tmWhy = '';
   if (tm.has) {
-    T = await cap(window.lift.tmdbFind({ name: d.name, origin_name: d.origin_name || inf.name_eng, year: d.year, type: d.type }), tm.slow ? 15000 : 6000);
+    T = await cap(window.lift.tmdbFind({ name: d.name, origin_name: d.origin_name || inf.name_eng, year: d.year, type: d.type }), tm.slow ? 15000 : 8000);
     if (!alive()) return;
-    if (T && (T.error || T.none)) { if (T.error) tmError(T.error); T = null; }
-  }
-  const got = await cap(Promise.all([
-    pre(d.poster),
-    T && T.backdrop ? pre(TMG(T.backdrop, 'w1280')) : '',
-    T && T.logo ? pre(TMG(T.logo, 'w500')) : '',
-    T ? window.lift.ratings({ kind: T.kind, tmdb: T.tmdb, imdb: T.imdb }).catch(() => null) : null
-  ]), tm.slow ? 12000 : 5000);
+    if (!T) tmWhy = 'TMDB не ответил вовремя';
+    else if (T.error) { tmError(T.error); tmWhy = { BAD_KEY: 'TMDB не принял ключ', NETWORK: 'TMDB недоступен', TIMEOUT: 'TMDB отвечает слишком долго', HTTP: 'TMDB вернул ошибку', NO_KEY: 'не задан ключ TMDB' }[T.error] || 'ошибка TMDB (' + T.error + ')'; T = null; }
+    else if (T.none) { tmWhy = 'этот фильм не найден в TMDB'; T = null; }
+  } else tmWhy = 'не задан ключ TMDB';
+  // каждая часть ждёт отдельно: если одна из картинок не успела, остальное всё равно показываем
+  const [posterOk, bd0, logo0, R0] = await Promise.all([
+    cap(pre(d.poster), 6000),
+    T && T.backdrop ? cap(pre(TMG(T.backdrop, 'w1280')), tm.slow ? 12000 : 8000) : '',
+    T && T.logo ? cap(pre(TMG(T.logo, 'w500')), tm.slow ? 12000 : 8000) : '',
+    T ? cap(window.lift.ratings({ kind: T.kind, tmdb: T.tmdb, imdb: T.imdb }).catch(() => null), tm.slow ? 12000 : 8000) : null
+  ]);
   if (!alive()) return;
-  let posterOk = '';
-  if (got) { [posterOk, bdSrc, logoSrc, R] = got; }
-  const posterSrc = posterOk || (T && T.poster ? TMG(T.poster, 'w500') : d.poster);
+  bdSrc = bd0 || ''; logoSrc = logo0 || ''; R = R0 || null;
+  if (T && T.backdrop && !bdSrc) tmWhy = 'картинки TMDB не загрузились (см. Настройки → Проверка связи)';
+  const posterSrc = (posterOk || '') || (T && T.poster ? TMG(T.poster, 'w500') : d.poster);
   const extraRates = R ? [
     R.lb ? `<span class="rate lb ${rateClass(R.lb.value * 2)}" data-ext="${esc(R.lb.url)}" style="cursor:pointer" title="Letterboxd · ${Number(R.lb.count).toLocaleString('ru')} оценок (из 5)">${brandIcon('lb')}<b>${R.lb.value.toFixed(1)}</b></span>` : '',
     R.rt != null ? `<span class="rate rt ${R.rt >= 60 ? 'hi' : 'lo'}" title="Rotten Tomatoes: рейтинг критиков">${brandIcon('rt')}<b>${R.rt}%</b></span>` : '',
@@ -526,6 +529,7 @@ async function renderDetails(view, route, alive) {
           ${d.quality ? `<span class="chip">${esc(d.quality)}</span>` : ''}
         </div>
         <div class="meta" style="--i:4;margin-top:12px">${(inf.genre || []).map((g) => `<button class="chip genre" data-genre="${esc(g)}" data-sec="${SEC_BY_TYPE[d.type] || 'films'}" title="Популярное в жанре «${esc(g)}»">${esc(g)}</button>`).join('')}</div>
+        ${tmWhy ? `<div class="hint" style="--i:5;margin:10px 0 0;opacity:.75">Данные TMDB не загружены: ${esc(tmWhy)}. Откройте Настройки → Проверка связи.</div>` : ''}
         <div class="det-rates" style="--i:5">
           ${kp ? `<span class="rate kp ${rateClass(kp)}" title="Кинопоиск">${brandIcon('kp')}<b>${kp.toFixed(1)}</b></span>` : ''}
           ${im ? `<span class="rate imdb ${rateClass(im)}" title="IMDb">${brandIcon('imdb')}<b>${im.toFixed(1)}</b></span>` : ''}
