@@ -1,11 +1,11 @@
 'use strict';
 /* ================= Телевизор ================= */
 const TVS = {
-  scope: 'stable', cat: 'Все', q: '', channels: [], byId: new Map(), errors: [], lists: null,
+  scope: 'stable', country: '', cat: 'Все', q: '', channels: [], byId: new Map(), errors: [], lists: null,
   epg: {}, alias: {}, epgAt: 0, epgBusy: false, epgErr: '',
   hls: null, cur: null, srcIdx: 0, timers: {}, shown: 0, tick: null
 };
-const TV_SCOPES = [['stable', 'Стабильные'], ['all', 'Все каналы'], ['world', 'Мир'], ['mine', 'Мои плейлисты']];
+const TV_SCOPES = [['stable', 'Стабильные'], ['all', 'Все каналы'], ['wide', 'По странам'], ['mine', 'Мои плейлисты']];
 const tvTok = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const tvUrl = (s) => 'lumatv://p/' + tvTok({ u: s.url, ua: s.ua || '', ref: s.ref || '' });
 const hm = (t) => new Date(t).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
@@ -57,14 +57,26 @@ window.lift.onTvEpg(async () => { await tvLoadEpg(); TVS.epgErr = ''; if (curren
 window.lift.onTvEpgState((s) => { TVS.epgBusy = !!s.busy; if (s.fetchedAt) TVS.epgAt = s.fetchedAt; TVS.epgErr = s.error || ''; const el = $('#tvEpgChip'); if (el) { el.textContent = tvEpgStatus(); el.classList.toggle('busy', TVS.epgBusy); } });
 
 /* ---------- каналы: фильтры ---------- */
+// «По странам»: общий каталог, выбранная страна сужает его. Без страны и без запроса показываем выбор страны
+const tvWide = () => TVS.scope === 'wide';
+const tvBase = () => (tvWide() && TVS.country ? TVS.channels.filter((c) => (c.cc || 'int').toUpperCase() === TVS.country) : TVS.channels);
+const tvLanding = () => tvWide() && !TVS.country && !TVS.q.trim() && TVS.cat === 'Все';
+const tvRegion = (() => { let dn = null; try { dn = new Intl.DisplayNames(['ru'], { type: 'region' }); } catch {} return (cc) => { const u = String(cc || '').toUpperCase(); if (!u || u === 'INT') return 'Международные'; try { return (dn && dn.of(u === 'UK' ? 'GB' : u)) || u; } catch { return u; } }; })();
+function tvCountriesHTML() {
+  const n = {}; TVS.channels.forEach((c) => { n[c.cc || 'int'] = (n[c.cc || 'int'] || 0) + 1; });
+  const rows = Object.entries(n).map(([cc, k]) => [cc, k, tvRegion(cc)]).sort((a, b) => b[1] - a[1]);
+  return `<div class="tv-landing"><h3>Выберите страну</h3><p class="hint">Или введите название канала в поиск выше, и он найдётся среди каналов всех стран. Список ведёт сообщество проекта iptv-org (<a data-ext="https://github.com/iptv-org/iptv">github.com/iptv-org/iptv</a>), часть ссылок может не работать.</p>
+    <div class="tv-countries">${rows.map(([cc, k, name]) => `<button class="tv-country" data-cc="${esc(cc === 'int' ? 'INT' : cc.toUpperCase())}"><b>${esc(name)}</b><small>${k} ${plural(k, 'канал', 'канала', 'каналов')}</small></button>`).join('')}</div></div>`;
+}
 function tvFiltered() {
   const q = TVS.q.trim().toLowerCase();
-  return TVS.channels.filter((c) => (TVS.cat === 'Все' || (TVS.cat === '★ Избранные' ? tvFav(c.id) : c.group === TVS.cat)) && (!q || c.name.toLowerCase().includes(q)));
+  return tvBase().filter((c) => (TVS.cat === 'Все' || (TVS.cat === '★ Избранные' ? tvFav(c.id) : c.group === TVS.cat)) && (!q || c.name.toLowerCase().includes(q)));
 }
 function tvCats() {
-  const n = {}; TVS.channels.forEach((c) => { n[c.group] = (n[c.group] || 0) + 1; });
-  const favs = TVS.channels.filter((c) => tvFav(c.id)).length;
-  return [['Все', TVS.channels.length], ...(favs ? [['★ Избранные', favs]] : []), ...Object.entries(n).sort((a, b) => b[1] - a[1])];
+  if (tvLanding()) return [];
+  const base = tvBase(), n = {}; base.forEach((c) => { n[c.group] = (n[c.group] || 0) + 1; });
+  const favs = base.filter((c) => tvFav(c.id)).length;
+  return [['Все', base.length], ...(favs ? [['★ Избранные', favs]] : []), ...Object.entries(n).sort((a, b) => b[1] - a[1])];
 }
 const logoImg = (c) => c.logo ? `<img src="${esc(c.logo)}" alt="" loading="lazy">` : '';
 const letter = (c) => `<span class="tv-letter">${esc((c.name || '?').trim()[0] || '?')}</span>`;
@@ -87,6 +99,8 @@ async function renderTv(view, route, alive) {
   const lists = await window.lift.tvLists();
   if (!alive()) return;
   TVS.scope = route.scope || state.tvPrefs.scope || 'stable';
+  if (TVS.scope === 'world') TVS.scope = 'stable';   // вкладку «Мир» убрали: мировые каналы теперь в «По странам»
+  TVS.country = state.tvPrefs.country || '';
   // сохранённый раздел «Мои плейлисты» без единого включённого плейлиста не показываем пустым
   if (TVS.scope === 'mine' && !route.scope && !lists.custom.some((c) => c.enabled)) TVS.scope = 'stable';
   const [chs] = await Promise.all([window.lift.tvChannels(TVS.scope), tvLoadEpg().catch(() => {})]);
@@ -98,11 +112,15 @@ async function renderTv(view, route, alive) {
   return tvBrowse(view, alive);
 }
 
+// страна выбрана или сброшена: перерисовываем тот же экран (go() с тем же маршрутом ничего не делает)
+function tvRerender() { currentRoute = { name: 'tv', scope: 'wide' }; render(currentRoute); }
+
 function tvHeader() {
   return `<div class="page-head tv-head"><h1>Телевизор</h1><span class="tv-chip" id="tvEpgChip">${esc(tvEpgStatus())}</span></div>
     <div class="filters tv-filters">
       <div class="seg" id="tvScope"><span class="ind"></span>${TV_SCOPES.map(([k, t]) => `<button data-s="${k}">${t}</button>`).join('')}</div>
-      <input class="tv-search" id="tvQ" placeholder="Найти канал" value="${esc(TVS.q)}" spellcheck="false">
+      <input class="tv-search" id="tvQ" placeholder="${tvWide() && !TVS.country ? 'Найти среди всех стран' : 'Найти канал'}" value="${esc(TVS.q)}" spellcheck="false">
+      ${tvWide() && TVS.country ? `<button class="pill on" id="tvCountry" title="Сбросить страну">${esc(tvRegion(TVS.country))} ✕</button>` : ''}
       <button class="pill" id="tvManage">${TVI.list.replace('<svg', '<svg width="15" height="15" style="vertical-align:-2px;margin-right:6px"')}Плейлисты</button>
       <button class="pill" id="tvRefresh" title="Обновить плейлисты и телепрограмму">${TVI.refresh.replace('<svg', '<svg width="15" height="15" style="vertical-align:-2px"')}</button>
     </div>`;
@@ -111,8 +129,10 @@ function tvWireHeader(view) {
   const seg = $('#tvScope');
   $$('button', seg).forEach((b) => b.classList.toggle('on', b.dataset.s === TVS.scope));
   requestAnimationFrame(() => { try { segIndicator(seg); } catch {} });
+  setTimeout(() => { try { segIndicator(seg); } catch {} }, 150);
   seg.onclick = (e) => { const b = e.target.closest('button'); if (!b || b.dataset.s === TVS.scope) return; state.tvPrefs.scope = b.dataset.s; persist('tvPrefs'); TVS.cat = 'Все'; go({ name: 'tv', scope: b.dataset.s }, { replace: true }); };
   $('#tvManage').onclick = () => openTvPlaylists();
+  const cb = $('#tvCountry'); if (cb) cb.onclick = () => { TVS.country = ''; state.tvPrefs.country = ''; persist('tvPrefs'); TVS.cat = 'Все'; TVS.q = ''; tvRerender(); };
   $('#tvRefresh').onclick = async () => { toast('Обновляем плейлисты и телепрограмму…'); await window.lift.tvListRefresh(); render(currentRoute); };
 }
 
@@ -127,7 +147,8 @@ async function tvBrowse(view, alive) {
   let shown = 0;
   const PAGE = 60;
   const tvBodyHTML = (list) => {
-    const showHome = TVS.cat === 'Все' && !TVS.q.trim();
+    if (tvLanding()) return tvCountriesHTML();
+    const showHome = TVS.cat === 'Все' && !TVS.q.trim() && !tvWide();
     let html = '';
     if (showHome) {
       const rail = (title, ids, extra = '') => {
@@ -165,6 +186,8 @@ async function tvBrowse(view, alive) {
     const star = e.target.closest('[data-star]');
     if (star) { e.stopPropagation(); const on = tvToggleFav(star.dataset.star); star.classList.toggle('on', on); drawCats(); return; }
     if (e.target.closest('#tvAddFirst')) { openTvPlaylists(true); return; }
+    const ext = e.target.closest('[data-ext]'); if (ext) { window.lift.openExternal(ext.dataset.ext); return; }
+    const cc = e.target.closest('[data-cc]'); if (cc) { TVS.country = cc.dataset.cc.toUpperCase(); state.tvPrefs.country = TVS.country; persist('tvPrefs'); TVS.cat = 'Все'; TVS.q = ''; tvRerender(); return; }
     const c = e.target.closest('.tv-card'); if (c) go({ name: 'tv', ch: c.dataset.ch, scope: TVS.scope });
   };
   clearInterval(TVS.tick); TVS.tick = setInterval(() => tvTick(), 30000);

@@ -1,6 +1,8 @@
 // Интеграция с TMDB: ключ пользователя, подборки, кадры и рекомендации.
 // Всё, что приходит из TMDB, сопоставляется с каталогом Luma по названию и году.
 const TMDB_API = 'https://api.themoviedb.org/3';
+// Общий тестовый ключ: лежит в секрете Worker на Cloudflare, а не в приложении. Используется, пока пользователь не ввёл свой ключ.
+const SHARED = 'https://luma-tmdb-shared.dimakirsch.workers.dev';
 const TV_TYPES = [3, 4, 5, 7];
 const MOVIE_TYPES = [1, 2, 6];
 
@@ -29,15 +31,15 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
   /* ---------- запросы ---------- */
   async function tmdb(path, params = {}, ttl = 3600000, keyOverride) {
     const key = keyOverride || getKey();
-    if (!key) throw Object.assign(new Error('NO_KEY'), { code: 'NO_KEY' });
+    const shared = !key;   // своего ключа нет: идём через общий посредник
     const px = String(getStore().tmdbProxy || '').replace(/\/+$/, '');
     const params2 = { language: 'ru-RU', ...params };
     const build = (base) => { const u = new URL(base + path); for (const [k, v] of Object.entries(params2)) u.searchParams.set(k, v); return u; };
     const headers = { Accept: 'application/json' };
-    const bearer = key.startsWith('eyJ');
+    const bearer = !!key && key.startsWith('eyJ');
     if (bearer) headers.Authorization = 'Bearer ' + key;
-    const keyed = (u) => { if (!bearer) u.searchParams.set('api_key', key); return u; };
-    const ck = build(TMDB_API).toString() + (bearer ? '#b' : '');
+    const keyed = (u) => { if (key && !bearer) u.searchParams.set('api_key', key); return u; };
+    const ck = build(TMDB_API).toString() + (bearer ? '#b' : '') + (shared ? '#s' : '');
     const hit = mem.get(ck);
     if (hit && Date.now() - hit.t < ttl) return hit.v;
     // Прямой путь быстрее, поэтому идём сначала им. Посредник (если задан) — запасной: к нему переключаемся,
@@ -45,6 +47,7 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
     const routes = [{ u: () => keyed(build(TMDB_API)), ms: px ? 6000 : 12000, direct: true }];
     if (px) routes.push({ u: () => keyed(build(px + '/3')), ms: 15000, direct: false });
     if (px && Date.now() < directBadUntil) routes.reverse();
+    if (shared) { routes.length = 0; routes.push({ u: () => build(SHARED + '/3'), ms: 15000, direct: false }); }
     let r, lastErr;
     for (const rt of routes) {
       try {
@@ -55,7 +58,7 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
       } catch (e) { lastErr = e; r = null; if (rt.direct) directBadUntil = Date.now() + 600000; }
     }
     if (!r) throw lastErr;
-    if (r.status === 401) throw Object.assign(new Error('BAD_KEY'), { code: 'BAD_KEY' });
+    if (r.status === 401 || r.status === 403) throw Object.assign(new Error(shared ? 'SHARED' : 'BAD_KEY'), { code: shared ? 'SHARED' : 'BAD_KEY' });
     if (!r.ok) throw Object.assign(new Error('HTTP ' + r.status), { code: 'HTTP' });
     const v = await r.json();
     mem.set(ck, { t: Date.now(), v });
@@ -111,7 +114,7 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
   }
 
   /* ---------- IPC ---------- */
-  ipcMain.handle('tmdb:status', () => ({ has: !!getKey() }));
+  ipcMain.handle('tmdb:status', () => ({ has: true, shared: !getKey() }));
   ipcMain.handle('tmdb:set', async (_e, raw) => {
     const key = String(raw || '').trim();
     if (!/^[\w.-]{20,}$/.test(key)) return { error: 'FORMAT' };
@@ -182,7 +185,7 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
         meta = { name: p.name, photo: p.photo_url || p.profile_url || '', photoTmdb: '', bio: p.biography || '', birthday: p.birthday || '', deathday: p.deathday || '', place: p.place_of_birth || '', roles: p.roles || [], counts: p.filmography && p.filmography.status === 'ready' ? { actor: p.filmography.actor || 0, director: p.filmography.director || 0 } : null };
         tmdbId = Number(p.external_ids && p.external_ids.tmdb) || 0;
       }
-      const hasKey = !!getKey();
+      const hasKey = true;
       let credits = null;
       if (hasKey && tmdbId) {
         const d = await tmdb('/person/' + tmdbId, { append_to_response: 'combined_credits' }, 3600000);
@@ -212,5 +215,5 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
     } catch (e) { return errCode(e); }
   });
 
-  return { tmdb, getKey, setKey, nameOk, pool };
+  return { tmdb, getKey, setKey, hasAccess: () => true, SHARED, nameOk, pool };
 };

@@ -24,7 +24,7 @@ module.exports = function initUpdater({ ipcMain, app, getWindow }) {
     autoUpdater.autoDownload = false;
     autoUpdater.autoInstallOnAppQuit = false;
     autoUpdater.allowPrerelease = false;
-    autoUpdater.logger = null;
+    autoUpdater.logger = process.env.UPDATE_DEBUG ? console : null;
     if (test) {
       autoUpdater.forceDevUpdateConfig = true; autoUpdater.currentVersion = new autoUpdater.currentVersion.constructor(test);   // тот же класс версии, что использует сам electron-updater
       // для проверки без публикации: UPDATE_TEST_URL=http://127.0.0.1:порт указывает на папку с latest.yml

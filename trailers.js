@@ -49,7 +49,7 @@ module.exports = function initTrailers({ getJson, tm }) {
   async function youtube(t) {
     const out = [];
     // 1) точные трейлеры из TMDB
-    if (t.tmdb && tm.getKey()) {
+    if (t.tmdb && tm.hasAccess()) {
       try {
         const kind = t.kind === 'tv' ? 'tv' : 'movie';
         const j = await tm.tmdb(`/${kind}/${t.tmdb}/videos`, { include_video_language: 'ru,en,null' }, 3600000);

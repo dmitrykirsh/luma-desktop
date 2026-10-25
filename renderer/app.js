@@ -81,7 +81,7 @@ function addHistory(it, season, episode) {
 /* ================= TMDB ================= */
 const tm = { has: false };
 const TMG = (p, s = 'w1280') => 'tmdbimg://image/t/p/' + s + p; // через прокси в main.js: очередь, повторы, кэш
-async function refreshTmdb() { try { tm.has = !!(await window.lift.tmdbStatus()).has; } catch { tm.has = false; } try { tm.slow = !!(await window.lift.tmdbProxyGet()).url; } catch { tm.slow = false; } }
+async function refreshTmdb() { try { const st = await window.lift.tmdbStatus(); tm.has = !!st.has; tm.shared = !!st.shared; } catch { tm.has = false; tm.shared = false; } try { tm.slow = !!(await window.lift.tmdbProxyGet()).url; } catch { tm.slow = false; } }
 
 /* ================= API ================= */
 const api = (p, ttl) => window.lift.api(p, ttl);
@@ -319,15 +319,35 @@ async function renderHome(view, _r, alive) {
   } else {
     $('#tmWrap').innerHTML = `<div class="promo"><div><b>Больше кино с ключом TMDB</b><span>Подключите бесплатный ключ — и здесь появятся тренды и подборки, а у фильмов настоящие кадры и рекомендации.</span></div><button class="btn primary" data-go-settings>Подключить</button></div>`;
   }
+  // праздничная вкладка главного баннера: если сейчас праздничное окно, наверху появляются вкладки «Праздник / В тренде»
+  HSETS = {}; heroTabs = []; heroUserPick = false;
+  if (window.lumaHoliday) window.lumaHoliday.load(alive, (set) => {
+    HSETS.holi = set; heroTabs = [{ k: 'holi', label: set.name }, { k: 'trend', label: 'В тренде' }];
+    if (!HSETS.trend) return;   // баннер ещё не готов: вкладки появятся вместе с ним
+    heroSwitch(heroUserPick ? (heroActive || 'trend') : 'holi');
+  });
   await Promise.allSettled(tasks);
 }
 function tmError(code) {
-  const t = { BAD_KEY: 'Ключ TMDB не подошёл — проверьте его в настройках', NETWORK: 'TMDB недоступен (возможно, нужен VPN)', TIMEOUT: 'TMDB отвечает слишком долго', HTTP: 'TMDB вернул ошибку' }[code];
+  const t = { BAD_KEY: 'Ключ TMDB не подошёл — проверьте его в настройках', SHARED: 'Общий тестовый ключ TMDB сейчас не работает: получите свой в настройках', NETWORK: 'TMDB недоступен (возможно, нужен VPN)', TIMEOUT: 'TMDB отвечает слишком долго', HTTP: 'TMDB вернул ошибку' }[code];
   if (t) toast(t);
 }
 
-async function buildHero(items, alive) {
-  const picks = items.filter((i) => i.poster).slice(0, 6);
+// наборы слайдов главного баннера: «В тренде» и праздничный (если сейчас праздничное окно)
+let HSETS = {}, heroTabs = [], heroActive = 'trend', heroUserPick = false, heroAlive = null;
+function heroSwitch(k) {
+  const set = HSETS[k]; if (!set || !heroAlive) return;
+  heroActive = k;
+  if (k === 'holi') buildHero(set.items, heroAlive, { key: 'holi', max: 24, tag: `${set.name} · ${window.lumaHoliday.when(set.diff).toLowerCase()}`, rgb: set.rgb });
+  else buildHero(set, heroAlive, { key: 'trend' });
+}
+async function buildHero(items, alive, opts = {}) {
+  heroAlive = alive;
+  if (!opts.key) {   // обычный вызов: это набор «В тренде»
+    HSETS.trend = items; heroActive = 'trend';
+    if (HSETS.holi && !heroUserPick) { heroSwitch('holi'); return; }
+  }
+  const picks = items.filter((i) => i.poster).slice(0, opts.max || 6);
   const infos = await Promise.all(picks.map((p) => info(p.id).catch(() => null)));
   if (!alive()) return;
   const hero = $('.hero'); if (!hero) return;
@@ -339,7 +359,7 @@ async function buildHero(items, alive) {
       <div class="hero-bgimg" style="background-image:url('${esc(bd || it.poster)}')"></div><div class="hero-shade"></div>
       <div class="hero-poster"><img src="${esc(it.poster)}" alt=""></div>
       <div class="hero-info">
-        <div class="hero-tag" style="--i:0">${ico('anime').replace('<svg', '<svg width="14" height="14"')} ${it.backdrop ? 'В тренде' : 'Новинка'}</div>
+        <div class="hero-tag" style="--i:0">${ico('anime').replace('<svg', '<svg width="14" height="14"')} ${esc(opts.tag || (it.backdrop ? 'В тренде' : 'Новинка'))}</div>
         <h1 style="--i:1">${esc(it.name)}</h1>
         <div class="meta" style="--i:2">
           ${r ? `<span class="rate ${rateClass(r)}" title="${Number(it.kp_rating) > 0 ? 'Кинопоиск' : 'IMDb'}">${brandIcon(Number(it.kp_rating) > 0 ? 'kp' : 'imdb')}<b>${r.toFixed(1)}</b></span>` : ''}
@@ -353,13 +373,18 @@ async function buildHero(items, alive) {
           <button class="btn ghost" data-act="open">Подробнее</button>
         </div></div></div>`;
   }).join('');
-  hero.innerHTML = slides + `<div class="hero-dots">${picks.map(() => '<div class="hero-dot"><i></i></div>').join('')}</div>`;
+  hero.innerHTML = slides + `<div class="hero-dots">${picks.map(() => '<div class="hero-dot"><i></i></div>').join('')}</div><div class="hero-count"></div>
+    <button class="hero-nav l" aria-label="Назад">${ico('chevl')}</button><button class="hero-nav r" aria-label="Дальше">${ico('chev')}</button>
+    ${heroTabs.length > 1 ? `<div class="hero-tabs">${heroTabs.map((t) => `<button class="hero-tab ${t.k === heroActive ? 'on' : ''}" data-tab="${t.k}">${esc(t.label)}</button>`).join('')}</div>` : ''}`;
+  hero.classList.toggle('many', picks.length > 10);
+  if (opts.rgb || HSETS.holi) hero.style.setProperty('--ha', opts.rgb || HSETS.holi.rgb);
   const sl = $$('.hero-slide', hero), dots = $$('.hero-dot', hero);
   let cur = -1;
   const DUR = 8000;
   const show = (n) => {
     cur = (n + sl.length) % sl.length;
     sl.forEach((s, i) => s.classList.toggle('on', i === cur));
+    const cnt = $('.hero-count', hero); if (cnt) cnt.textContent = `${cur + 1} / ${sl.length}`;
     dots.forEach((d, i) => { d.classList.remove('on'); if (i === cur) { void d.offsetWidth; d.style.setProperty('--dur', DUR + 'ms'); d.classList.add('on'); } });
     ambient(picks[cur].backdrop ? TMG(picks[cur].backdrop, 'w780') : picks[cur].poster);
     clearTimeout(heroTimer); heroTimer = setTimeout(() => show(cur + 1), DUR);
@@ -367,7 +392,11 @@ async function buildHero(items, alive) {
   hero.onmouseenter = () => { hero.classList.add('paused'); clearTimeout(heroTimer); };
   hero.onmouseleave = () => { hero.classList.remove('paused'); clearTimeout(heroTimer); heroTimer = setTimeout(() => show(cur + 1), 3000); };
   dots.forEach((d, i) => d.onclick = () => show(i));
+  $('.hero-nav.l', hero).onclick = (e) => { e.stopPropagation(); show(cur - 1); };
+  $('.hero-nav.r', hero).onclick = (e) => { e.stopPropagation(); show(cur + 1); };
   hero.onclick = (e) => {
+    const tab = e.target.closest('[data-tab]');
+    if (tab) { heroUserPick = true; heroSwitch(tab.dataset.tab); return; }
     const b = e.target.closest('[data-act]'); if (!b) return;
     const it = picks[cur];
     if (b.dataset.act === 'watch') openDetailsAndPlay(it); else go({ name: 'details', id: it.id, from: 'home' });
@@ -466,7 +495,7 @@ async function renderHistory(view) {
 /* ================= страница фильма ================= */
 function seasonsOf(d) {
   const e = d.episodes; if (!e || typeof e !== 'object') return [];
-  return Object.keys(e).sort((a, b) => a - b).map((k) => ({ season: k, episodes: e[k] }));
+  return Object.keys(e).sort((a, b) => a - b).map((k) => ({ season: k, episodes: [...e[k]].sort((a, b) => a - b) }));   // источник иногда отдаёт серии вперемешку (у «Очень странных дел» 5-й сезон: 8,7,6,…,1,9)
 }
 async function renderDetails(view, route, alive) {
   view.innerHTML = `<div class="empty"><div class="spin" style="margin:0 auto"></div></div>`;
@@ -925,6 +954,42 @@ function listCard(l, del) {
   const names = (l.names || []).slice(0, 3).map((n) => n.replace(/\s*\(\d{4}\)$/, '')).join(' · ');
   return `<div class="lcard" data-url="${esc(l.url)}"><span class="lsrc ${sc}">${sn}</span><h3>${esc(l.title)}</h3><div class="lmeta">${esc(sub)}</div>${l.desc ? `<p>${esc(l.desc)}</p>` : names ? `<p class="lnames">${esc(names)}…</p>` : ''}${del ? `<button class="ldel" data-ldel="${esc(l.url)}" title="Убрать из сохранённых">${ico('x')}</button>` : ''}</div>`;
 }
+/* ---------- красивые карточки подборок: размытая мозаика постеров, ряд постеров и название по-русски ---------- */
+const LENH = { io: null, queue: [], busy: 0 };
+function enhanceLists(root) {
+  if (!LENH.io) LENH.io = new IntersectionObserver((en) => {
+    for (const e of en) if (e.isIntersecting) { LENH.io.unobserve(e.target); LENH.queue.push(e.target); }
+    pumpLists();
+  }, { rootMargin: '250px' });
+  $$('.lcard:not([data-enh])', root).forEach((c) => { c.dataset.enh = '1'; LENH.io.observe(c); });
+}
+function pumpLists() {
+  while (LENH.busy < 3 && LENH.queue.length) {
+    const c = LENH.queue.shift(); if (!document.contains(c)) continue;
+    LENH.busy++;
+    enhanceCard(c).catch(() => {}).finally(() => { LENH.busy--; pumpLists(); });
+  }
+}
+async function enhanceCard(c) {
+  const h = $('h3', c), p = $('p:not(.lnames)', c);
+  const title = h ? h.textContent : '', desc = p ? p.textContent : '';
+  const [prev, tr] = await Promise.all([
+    window.lift.listsPreview(c.dataset.url).catch(() => null),
+    window.lift.listsTranslate([title, desc.length > 140 ? desc.slice(0, 140).replace(/\s+\S*$/, '') + '…' : desc].filter(Boolean)).catch(() => null)
+  ]);
+  if (!document.contains(c)) return;
+  const posters = (prev && prev.posters) || [];
+  if (posters.length) {
+    c.classList.add('has-art');
+    c.insertAdjacentHTML('afterbegin', `<div class="lbg">${posters.map((u) => `<i style="background-image:url('${esc(u)}')"></i>`).join('')}</div>`);
+    c.insertAdjacentHTML('beforeend', `<div class="lposters">${posters.map((u) => `<img src="${esc(u)}" alt="" loading="lazy">`).join('')}</div>`);
+  }
+  if (tr) {
+    const ru = tr[title];
+    if (h && ru && ru !== title) { h.textContent = ru; h.insertAdjacentHTML('afterend', `<div class="lorig">${esc(title)}</div>`); }
+    if (p && desc) { const key = desc.length > 140 ? desc.slice(0, 140).replace(/\s+\S*$/, '') + '…' : desc; if (tr[key] && tr[key] !== key) p.textContent = tr[key]; }
+  }
+}
 function segIndicator(seg) { const b = $('button.on', seg), i = $('.ind', seg); i.style.left = b.offsetLeft + 'px'; i.style.width = b.offsetWidth + 'px'; }
 
 async function renderLists(view, route, alive) {
@@ -932,6 +997,7 @@ async function renderLists(view, route, alive) {
   view.innerHTML = `<div class="page-head"><h1>Подборки</h1><p class="sub">Списки из Letterboxd, MDBList и Trakt. Показываются те фильмы из списка, которые есть на Luma.</p></div>
     <div class="filters"><div class="seg" id="lTabs"><span class="ind"></span><button data-t="saved">Сохранённые (${state.lists.length})</button><button data-t="find">Найти</button><button data-t="popular">Популярные</button></div></div><div id="lBody"></div>`;
   const body = $('#lBody'), seg = $('#lTabs');
+  new MutationObserver(() => enhanceLists(body)).observe(body, { childList: true, subtree: true });
   const keyNote = (have) => (have.mdblist && have.trakt ? '' : `<div class="promo" style="margin:18px 0 0"><div><b>Поиск прямо в приложении</b><span>Подключите бесплатные ключи ${[!have.mdblist && 'MDBList', !have.trakt && 'Trakt'].filter(Boolean).join(' и ')} в настройках — и подборки будут искаться здесь, без окна браузера.</span></div><button class="btn primary" data-go-settings>Подключить</button></div>`);
   const panels = {
     saved() {
@@ -1079,6 +1145,45 @@ function wireKeyCard(name) {
   inp.onkeydown = (e) => { if (e.key === 'Enter') $('#ks-' + name).click(); };
   const del = $('#kd-' + name); if (del) del.onclick = async () => { await window.lift.keyClear(name); toast('Ключ удалён'); renderSettings($('#view')); };
 }
+/* разделы настроек: каждый показывает только свои карточки, поэтому страница не превращается в длинную ленту */
+const SET_GROUPS = [
+  ['keys', 'Сервисы и ключи', 'TMDB, оценки, подборки', '<path d="M15 7a4 4 0 1 0-3.9 4.9L4 19v2h3v-2h2v-2h2l2.4-2.4A4 4 0 0 0 15 7z"/>'],
+  ['net', 'Связь', 'Обход блокировок и проверка', '<path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M11 18.5a2 2 0 0 1 2 0"/>'],
+  ['look', 'Оформление', 'Заставка и фон', '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.5 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/>'],
+  ['sync', 'ТВ и копии', 'Синхронизация, резервная копия', '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/>'],
+  ['data', 'Данные', 'История, клавиши', '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'],
+  ['about', 'О приложении', 'Версия и обновления', '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5"/>']
+];
+function setGroupOf(sec) {
+  const id = sec.id;
+  if (id === 'lookCard') return 'look';
+  if (id === 'tmProxyCard' || id === 'diagCard') return 'net';
+  if (id === 'tvSync' || id === 'bkCard') return 'sync';
+  if (id === 'updCard' || sec.classList.contains('about')) return 'about';
+  const h = (sec.querySelector('h2')?.textContent || '');
+  if (/Данные|Горячие/.test(h)) return 'data';
+  return 'keys';
+}
+function setupSettingsGroups(view) {
+  const secs = $$('.set-wrap > section', view);
+  secs.forEach((s) => { s.dataset.grp = setGroupOf(s); });
+  // длинные пошаговые инструкции сворачиваем: раскрыта только у ещё не подключённого TMDB
+  $$('ol.steps', view).forEach((ol, i) => {
+    const card = ol.closest('.set-card'), connected = !!card.querySelector('.status.ok');
+    const d = document.createElement('details'); d.className = 'set-steps'; d.open = i === 0 && !connected;
+    d.innerHTML = '<summary>Как это настроить</summary>'; ol.replaceWith(d); d.appendChild(ol);
+  });
+  const nav = $('#setNav', view);
+  nav.innerHTML = SET_GROUPS.map(([k, t, sub, ic]) => `<button class="set-nav-it" data-g="${k}"><svg viewBox="0 0 24 24">${ic}</svg><span><b>${t}</b><small>${sub}</small></span></button>`).join('');
+  const show = (g) => {
+    try { localStorage.setItem('luma.setgrp', g); } catch {}
+    $$('.set-nav-it', nav).forEach((b) => b.classList.toggle('on', b.dataset.g === g));
+    secs.forEach((s) => { s.hidden = s.dataset.grp !== g; });
+  };
+  nav.onclick = (e) => { const b = e.target.closest('.set-nav-it'); if (b) show(b.dataset.g); };
+  let g0 = 'keys'; try { g0 = localStorage.getItem('luma.setgrp') || 'keys'; } catch {}
+  show(SET_GROUPS.some((x) => x[0] === g0) ? g0 : 'keys');
+}
 async function renderSettings(view) {
   await refreshTmdb();
   const omHas = !!(await window.lift.omdbStatus()).has;
@@ -1093,17 +1198,27 @@ async function renderSettings(view) {
   ];
   const tmProxyUrl = (await window.lift.tmdbProxyGet()).url || '';
   view.innerHTML = `<div class="page-head"><h1>Настройки</h1></div>
+  <div class="set-layout"><nav class="set-nav" id="setNav"></nav>
   <div class="set-wrap">
     <section class="set-card">
       <div class="set-head"><div><h2>TMDB — подборки, кадры и рекомендации</h2><p>The Movie Database — крупнейшая открытая база фильмов. С вашим ключом приложение показывает на главной тренды и лучшие подборки, на странице фильма — настоящие кадры, логотип и рекомендации зрителей. В каталог попадает только то, что есть на Luma.</p></div>
-      <span class="status ${tm.has ? 'ok' : ''}" id="tmStatus">${tm.has ? 'Подключено' : 'Не подключено'}</span></div>
+      <span class="status ${tm.has && !tm.shared ? 'ok' : ''}" id="tmStatus">${tm.shared ? 'Тестовый общий ключ' : tm.has ? 'Подключено' : 'Не подключено'}</span></div>
       <ol class="steps">${steps.map((s, i) => `<li><i>${i + 1}</i><div><b>${esc(s[0])}</b><span>${esc(s[1])}</span>${s[2] ? `<button class="pill" data-ext="${s[2][1]}">${esc(s[2][0])} ↗</button>` : ''}</div></li>`).join('')}</ol>
-      <div class="key-row"><input id="tmKey" type="password" placeholder="${tm.has ? '•••••••••••••••• (ключ сохранён)' : 'Вставьте ключ сюда'}" spellcheck="false" autocomplete="off">
+      <div class="key-row"><input id="tmKey" type="password" placeholder="${tm.has && !tm.shared ? '•••••••••••••••• (ключ сохранён)' : 'Вставьте ключ сюда'}" spellcheck="false" autocomplete="off">
         <button class="pill" id="tmShow">Показать</button>
         <button class="btn primary" id="tmSave">Проверить и сохранить</button>
-        ${tm.has ? '<button class="btn ghost" id="tmDel">Удалить ключ</button>' : ''}</div>
+        ${tm.has && !tm.shared ? '<button class="btn ghost" id="tmDel">Удалить ключ</button>' : ''}</div>
       <p class="hint" id="tmMsg"></p>
+      ${tm.shared ? '<p class="hint">Сейчас работает общий тестовый ключ: у него общий лимит, и он может перестать работать. Лучше получить свой: это бесплатно и занимает пару минут (шаги выше). Свой ключ всегда главнее общего.</p>' : ''}
       <p class="hint">Если TMDB не открывается в вашей сети, понадобится VPN: подборки и кадры берутся напрямую с серверов TMDB. Сам каталог и просмотр от этого не зависят.</p>
+    </section>
+    <section class="set-card" id="lookCard">
+      <div class="set-head"><div><h2>Оформление</h2><p>Заставка с анимацией логотипа и звуком при запуске и медленное тёмное переливание фона.</p></div></div>
+      <div class="opt-list">
+        <div class="opt-row"><div><b>Заставка со звуком</b><span>Анимация логотипа и короткий звук при запуске</span></div><button class="tgl ${optGet('luma.intro', '1') !== '0' ? 'on' : ''}" role="switch" aria-checked="${optGet('luma.intro', '1') !== '0'}" data-opt="intro"><i></i></button></div>
+        <div class="opt-row"><div><b>Праздничные подборки</b><span>Баннер с фильмами к Новому году, Хэллоуину, 9 мая и другим датам</span></div><button class="tgl ${optGet('luma.holi', '1') !== '0' ? 'on' : ''}" role="switch" aria-checked="${optGet('luma.holi', '1') !== '0'}" data-opt="holi"><i></i></button></div>
+        <div class="opt-row"><div><b>Анимированный фон</b><span>Медленное тёмное переливание за каталогом</span></div><button class="tgl ${optGet('luma.aurora', '1') !== '0' ? 'on' : ''}" role="switch" aria-checked="${optGet('luma.aurora', '1') !== '0'}" data-opt="aurora"><i></i></button></div>
+      </div>
     </section>
     <section class="set-card" id="tmProxyCard">
       <div class="set-head"><div><h2>TMDB не открывается? Свой адрес-посредник</h2><p>Если провайдер блокирует TMDB, а VPN не хочется, можно бесплатно поднять посредника на Cloudflare Workers за пару минут. Luma будет обращаться к нему, а не к TMDB напрямую.</p></div>
@@ -1155,7 +1270,8 @@ async function renderSettings(view) {
     <section class="set-card"><div class="set-head"><div><h2>Горячие клавиши</h2><p><kbd>Ctrl K</kbd> поиск · <kbd>Alt ←</kbd>/<kbd>Alt →</kbd> или боковые кнопки мыши — назад/вперёд · <kbd>Esc</kbd> закрыть · <kbd>F</kbd> полный экран в плеере</p></div></div></section>
     <section class="set-card" id="updCard"></section>
     <section class="set-card about"><div id="aboutLogo"></div><div><p class="slogan">Включи свою историю</p><p class="hint" style="margin-top:6px" id="aboutVer"></p></div></section>
-  </div>`;
+  </div></div>`;
+  setupSettingsGroups(view);
   const msg = $('#tmMsg'), inp = $('#tmKey');
   $$('[data-ext]', view).forEach((b) => b.onclick = () => window.lift.openExternal(b.dataset.ext));
   $('#tmShow').onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; $('#tmShow').textContent = inp.type === 'password' ? 'Показать' : 'Скрыть'; };
@@ -1384,16 +1500,40 @@ window.lift.onWinState((s) => {
   if (s.fs !== undefined) document.body.classList.toggle('fs', s.fs);
 });
 
+/* ================= оформление: заставка и фон ================= */
+function optGet(k, d) { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } }
+document.addEventListener('visibilitychange', () => document.body.classList.toggle('is-hidden', document.visibilityState !== 'visible'));
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-opt]'); if (!b) return;
+  const k = 'luma.' + b.dataset.opt, v = optGet(k, '1') === '0' ? '1' : '0';
+  try { localStorage.setItem(k, v); } catch {}
+  if (b.dataset.opt === 'aurora') document.body.classList.toggle('noaurora', v === '0');
+  b.classList.toggle('on', v !== '0'); b.setAttribute('aria-checked', v !== '0');
+});
+
 /* ================= старт ================= */
 (async function init() {
   $('#logoSlot').innerHTML = window.lumaLogo({ height: 34 });
   $('#plLogo').innerHTML = window.lumaLogo({ wordmark: false, height: 72 });
-  $('#splashLogo').innerHTML = window.lumaLogo({ height: 64 });
+  $('#splashLogo').innerHTML = window.lumaLogo({ wordmark: false, height: 84 });
+  if (optGet('luma.aurora', '1') === '0') document.body.classList.add('noaurora');
+  // заставка: логотип с анимацией и коротким звуком; приложение открывается, когда звук и анимация закончились
+  const introOn = optGet('luma.intro', '1') !== '0';
+  let introAt = 0;
+  const startIntro = () => {
+    if (introAt) return; introAt = Date.now();
+    if (!introOn) return;
+    $('#splash').classList.add('go');
+    try { const a = new Audio('intro.mp3'); a.volume = 0.6; a.play().catch(() => {}); } catch {}
+  };
+  if (document.visibilityState === 'visible') startIntro(); else document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') startIntro(); }, { once: true });
+  setTimeout(startIntro, 3000);
   await initStore();
   await refreshTmdb();
   buildNav();
   go({ name: 'home' });
-  setTimeout(() => $('#splash').classList.add('gone'), 900);
+  const left = introOn ? Math.max(0, 2850 - (Date.now() - (introAt || Date.now()))) : 0;
+  setTimeout(() => { const sp = $('#splash'); sp.classList.add('out'); setTimeout(() => sp.classList.add('gone'), 520); }, left);
 })();
 
 

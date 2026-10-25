@@ -185,12 +185,12 @@ module.exports = function initLb({ ipcMain, safeStorage, getStore, saveStore, ge
     url: 'tr:' + l.ids.trakt, source: 'trakt', title: l.name, author: l.user?.username || l.user?.ids?.slug || '', count: l.item_count || 0, likes: l.likes || 0,
     desc: decode(l.description).slice(0, 200)
   });
-  async function getTrList(id) {
-    const ck = 'src:tr:' + id, hit = cached(ck, 1800000);
+  async function getTrList(id, quick) {
+    const ck = 'src:tr:' + id + (quick ? ':q' : ''), hit = cached(ck, 1800000);
     if (hit) return hit;
     const meta = (await trakt('/lists/' + id)).json;
     const films = [];
-    for (let page = 1, pages = 1; page <= Math.min(pages, 6); page++) {
+    for (let page = 1, pages = 1; page <= Math.min(pages, quick ? 1 : 6); page++) {
       const r = await trakt('/lists/' + id + '/items/movies,shows', { page, limit: 100 });
       pages = r.pages;
       for (const x of r.json) {
@@ -241,6 +241,51 @@ module.exports = function initLb({ ipcMain, safeStorage, getStore, saveStore, ge
       return { list: await getLbList(url) };
     } catch (e) { return errOut(e); }
   });
+  /* ---------- оформление карточек подборок: постеры из списка и перевод названий ---------- */
+  const listPrev = () => (getStore().listPrev ||= {});
+  ipcMain.handle('lists:preview', async (_e, ref) => {
+    try {
+      ref = String(ref || '');
+      const c = listPrev()[ref];
+      if (c && Date.now() - c.t < 7 * 864e5) return { posters: c.p };
+      let list;
+      if (ref.startsWith('md:')) list = await getMdList(ref.slice(3));
+      else if (ref.startsWith('tr:')) list = await getTrList(ref.slice(3), true);
+      else { const url = await normalizeListUrl(ref); if (!url) return { posters: [] }; list = await getLbList(url, true); }
+      const got = await tm.pool((list.films || []).slice(0, 16), 4, matchFilm);
+      const posters = got.filter((x) => x && x.poster).slice(0, 4).map((x) => x.poster);
+      if (posters.length) {
+        const m = listPrev(); m[ref] = { t: Date.now(), p: posters };
+        const keys = Object.keys(m); if (keys.length > 400) for (const k of keys.slice(0, keys.length - 400)) delete m[k];
+        saveStore();
+      }
+      return { posters };
+    } catch { return { posters: [] }; }
+  });
+  const listTr = () => (getStore().listTr2 ||= {});
+  async function toRussian(s) {
+    const c = listTr(); if (c[s]) return c[s];
+    try {
+      const r = await fetch('https://api.mymemory.translated.net/get?langpair=en|ru&q=' + encodeURIComponent(s.slice(0, 450)), { signal: AbortSignal.timeout(8000) });
+      const j = await r.json();
+      // из памяти переводов иногда приходит чужая фраза с высокой «уверенностью», поэтому берём машинный перевод (MT!)
+      const mt = (j.matches || []).find((m) => m['created-by'] === 'MT!');
+      const t = String((mt && mt.translation) || (j.responseData && j.responseData.translatedText) || '').trim();
+      if (t && CYR.test(t) && !/MYMEMORY WARNING|QUERY LENGTH LIMIT|INVALID/i.test(t)) {
+        c[s] = t;
+        const keys = Object.keys(c); if (keys.length > 3000) for (const k of keys.slice(0, keys.length - 3000)) delete c[k];
+        return t;
+      }
+    } catch {}
+    return s;
+  }
+  ipcMain.handle('lists:translate', async (_e, texts) => {
+    const out = {};
+    const todo = [...new Set((texts || []).map((x) => String(x || '').trim()).filter(Boolean))].slice(0, 12);
+    await tm.pool(todo, 3, async (s) => { out[s] = CYR.test(s) ? s : await toRussian(s); });
+    saveStore();
+    return out;
+  });
   // совместимость со старыми вызовами
   ipcMain.handle('lb:popular', async () => { try { return { lists: await getLbPopular() }; } catch (e) { return errOut(e); } });
 
@@ -255,7 +300,7 @@ module.exports = function initLb({ ipcMain, safeStorage, getStore, saveStore, ge
     const near = (x) => !f.year || !x.year || Math.abs(x.year - f.year) <= 1;
     const pick = (items, names) => items.find((x) => types.includes(x.type) && near(x) && names.some((n) => tm.nameOk(x.origin_name, n) || tm.nameOk(x.name, n)));
     let hit = pick(await liftSearch(f.title), [f.title]);
-    if (!hit && tm.getKey()) {
+    if (!hit && tm.hasAccess()) {
       // русское и оригинальное название через TMDB, затем повторный поиск в Luma
       let t = null;
       if (f.tmdb) t = await tm.tmdb(`/${kind}/${f.tmdb}`, {}, 86400000).catch(() => null);

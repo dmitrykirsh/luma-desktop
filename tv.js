@@ -13,10 +13,12 @@ const UA_DEFAULT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36
 const RAW = 'https://raw.githubusercontent.com/smolnp/IPTVru/gh-pages/';
 const BUILTIN = {
   stable: { name: 'Стабильные', url: RAW + 'IPTVstable.m3u8' },
-  main: { name: 'Основной', url: RAW + 'IPTVru.m3u' },
-  world: { name: 'Мировые', url: RAW + 'IPTVmir.m3u8' }
+  main: { name: 'Основной', url: RAW + 'IPTVru.m3u' }
 };
 const EPG_URL = 'https://iptvx.one/epg/epg_lite.xml.gz';
+// «По странам»: общий каталог iptv-org (проект сообщества, каналы всех стран; ссылки проверяются автоматически)
+const WIDE = { name: 'Каналы мира', url: 'https://iptv-org.github.io/iptv/index.m3u' };
+const WIDE_GROUPS = { General: 'Общие', Movies: 'Фильмы', Series: 'Сериалы', Entertainment: 'Развлекательные', Music: 'Музыка', Sports: 'Спорт', News: 'Новости', Kids: 'Детские', Documentary: 'Документальные', Religious: 'Религия', Culture: 'Культура', Outdoor: 'Природа и путешествия', Lifestyle: 'Стиль жизни', Undefined: 'Без категории', Education: 'Образование', Animation: 'Мультфильмы', Business: 'Бизнес', Comedy: 'Комедии', Cooking: 'Кулинария', Family: 'Семейные', Legislative: 'Парламент', Public: 'Общественные', Relax: 'Релакс', Science: 'Наука', Shop: 'Магазины', Travel: 'Путешествия', Weather: 'Погода', Auto: 'Авто', Classic: 'Классика', Interactive: 'Интерактивные', Local: 'Местные' };
 const ADULT = /(xxx|эротик|для взрослых|взрослые|adult|18\+)/i;
 const MAX_CUSTOM = 20;
 const PL_TTL = 6 * 3600e3, EPG_TTL = 6 * 3600e3;
@@ -113,7 +115,14 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
     const get = async (entry, prefix) => { try { return toChannels(await loadList(entry, force), prefix); } catch (e) { errors.push({ list: entry.name, error: e.code || 'NETWORK' }); return []; } };
     let list = [];
     if (scope === 'stable') list = (await get({ ...BUILTIN.stable, id: 'stable', builtin: true }, '')).map((c) => ({ ...c, stable: true }));
-    else if (scope === 'world') list = await get({ ...BUILTIN.world, id: 'world', builtin: true }, 'w:');
+    else if (scope === 'wide') {
+      try {
+        const items = (await loadList({ ...WIDE, id: 'wide', builtin: true }, force))
+          .filter((c) => !/\[(?:Not 24\/7|Geo-blocked)\]/i.test(c.name))   // каналы с пометками «не круглосуточно» и «только из своей страны» не показываем
+          .map((c) => ({ ...c, name: c.name.replace(/\s*\(\d{3,4}p\)/gi, '').replace(/\s*\[[^\]]*\]/g, '').trim(), group: String(c.group || '').split(';').map((g) => WIDE_GROUPS[g.trim()] || g.trim()).filter(Boolean)[0] || 'Без категории' }));
+        list = toChannels(items, 'x:').map((c) => ({ ...c, cc: ((c.tvg || '').match(/\.([a-z]{2,3})(?:@|$)/) || [])[1] || '' }));
+      } catch (e) { errors.push({ list: WIDE.name, error: e.code || 'NETWORK' }); }
+    }
     else if (scope === 'mine') { for (const e of customLists().filter((x) => x.enabled !== false)) list.push(...(await get(e, 'c' + e.id + ':')).map((c) => ({ ...c, list: e.name }))); }
     else {
       const [main, stable] = await Promise.all([get({ ...BUILTIN.main, id: 'main', builtin: true }, ''), get({ ...BUILTIN.stable, id: 'stable', builtin: true }, '')]);
@@ -132,8 +141,8 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
   ipcMain.handle('tv:channels', async (_e, scope, force) => {
     try {
       const r = await channelsFor(scope || 'stable', !!force);
-      if (scope !== 'world') for (const c of r.channels) known.set(c.id, { name: c.name, tvg: c.tvg });
-      return { channels: r.channels.map((c) => ({ id: c.id, name: c.name, group: c.group, logo: c.logo, tvg: c.tvg, stable: !!c.stable, list: c.list || '', sources: c.sources })), errors: r.errors };
+      if (scope !== 'wide') for (const c of r.channels) known.set(c.id, { name: c.name, tvg: c.tvg });
+      return { channels: r.channels.map((c) => ({ id: c.id, name: c.name, group: c.group, logo: c.logo, tvg: c.tvg, stable: !!c.stable, list: c.list || '', cc: c.cc || '', sources: c.sources })), errors: r.errors };
     } catch (e) { return errCode(e); }
   });
 

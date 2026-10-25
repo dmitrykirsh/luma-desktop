@@ -23,6 +23,8 @@ contextBridge.exposeInMainWorld('lift', {
   listsSearch: (q) => ipcRenderer.invoke('lists:search', q),
   listsTop: () => ipcRenderer.invoke('lists:top'),
   listsGet: (ref) => ipcRenderer.invoke('lists:get', ref),
+  listsPreview: (ref) => ipcRenderer.invoke('lists:preview', ref),
+  listsTranslate: (t) => ipcRenderer.invoke('lists:translate', t),
   onListAdded: (cb) => ipcRenderer.on('lists:added', (_e, l) => cb(l)),
   keysStatus: () => ipcRenderer.invoke('keys:status'),
   keySet: (n, k) => ipcRenderer.invoke('key:set', n, k),

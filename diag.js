@@ -55,13 +55,13 @@ module.exports = function initDiag({ ipcMain, app, getStore, tm }) {
     } else lines.push('— Свой посредник TMDB: не используется');
 
     // ключ TMDB: есть ли и принимает ли его TMDB (через тот же путь, что использует приложение)
-    if (!tm.getKey()) lines.push('✗ Ключ TMDB: не задан (без него кадры, логотипы и рейтинги не показываются)');
-    else {
-      try { await tm.tmdb('/configuration', {}, 0); lines.push('✓ Ключ TMDB: принят'); }
+    if (!tm.getKey()) lines.push('— Ключ TMDB: свой не задан, работает общий тестовый (через посредника Luma)');
+    {
+      try { await tm.tmdb('/configuration', {}, 0); lines.push(tm.getKey() ? '✓ Ключ TMDB: принят' : '✓ Общий тестовый ключ TMDB: работает'); }
       catch (e) { lines.push('✗ Ключ TMDB: ' + (e.code === 'BAD_KEY' ? 'TMDB его не принял' : 'TMDB недоступен (' + (e.code || e.name || 'ошибка') + ')')); }
     }
     // полный цикл, как на странице фильма: поиск «Форрест Гамп», затем карточка со всем (кадры, логотип, рекомендации)
-    if (tm.getKey()) {
+    {
       const step = async (name, fn) => {
         const t0 = Date.now();
         try { const v = await fn(); lines.push(`✓ ${name}: ${v} (${Date.now() - t0} мс)`); return true; }
