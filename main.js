@@ -154,7 +154,7 @@ const backupApi = require('./backup')({
     mdblist: { get: () => lbApi.getSecret('mdblist'), set: (v) => lbApi.setSecret('mdblist', v) }
   }
 });
-require('./sync')({ ipcMain, app, getWindow: () => win, backup: backupApi, reload: () => { if (win && !win.isDestroyed()) win.webContents.send('sync:applied'); } });
+require('./sync')({ ipcMain, app, safeStorage, getStore: () => store, saveStore, getWindow: () => win, backup: backupApi, reload: () => { if (win && !win.isDestroyed()) win.webContents.send('sync:applied'); } });
 
 ipcMain.handle('api:post', async (_e, p, body) => {
   return apiRequest(p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, body: JSON.stringify(body) });

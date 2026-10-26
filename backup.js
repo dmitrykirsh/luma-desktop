@@ -54,12 +54,22 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
       } else if (k === 'seen') {
         out.seen = { ...(cur.seen || {}) };
         for (const [sk, arr] of Object.entries(v || {})) out.seen[sk] = [...new Set([...(out.seen[sk] || []), ...arr])];
+      } else if (k === 'done') { out.done = { ...(cur.done || {}) }; for (const [dk, arr] of Object.entries(v || {})) out.done[dk] = [...new Set([...(out.done[dk] || []), ...arr])];
       } else if (k === 'tvFav') out.tvFav = [...new Set([...(cur.tvFav || []), ...(v || [])])];
       else if (k === 'tvStats') { out.tvStats = { ...(cur.tvStats || {}) }; for (const [id, st] of Object.entries(v || {})) { const o = out.tvStats[id]; if (!o || (st.last || 0) > (o.last || 0)) out.tvStats[id] = { ...st, n: Math.max(st.n || 0, o ? o.n || 0 : 0), t: Math.max(st.t || 0, o ? o.t || 0 : 0) }; } }
       else if (k === 'progress') { out.progress = { ...(cur.progress || {}) }; for (const [pk, pv] of Object.entries(v || {})) if (!out.progress[pk] || (pv.ts || 0) > (out.progress[pk].ts || 0)) out.progress[pk] = pv; }
       else if (k === 'tvCustom') { const c = cur.tvCustom || []; out.tvCustom = [...c, ...(v || []).filter((e) => e && !c.some((x) => x.url && x.url === e.url))]; }
+      else if (k === 'gone') { out.gone = { ...(cur.gone || {}) }; for (const [gk, gts] of Object.entries(v || {})) if (gts > (out.gone[gk] || 0)) out.gone[gk] = gts; }
       else if (k === 'lbRecent') out.lbRecent = [...new Set([...(v || []), ...(cur.lbRecent || [])])].slice(0, 8);
       else out[k] = v; // остальные настройки берём из копии
+    }
+    // отметки об удалении: удалённое на одном устройстве не возвращается с другого
+    const gone = out.gone || cur.gone || {}, cut = Date.now() - 90 * 864e5;
+    for (const gk of Object.keys(gone)) if (gone[gk] < cut) delete gone[gk];
+    if (Object.keys(gone).length) {
+      out.gone = gone;
+      if (out.favs) out.favs = out.favs.filter((f) => !(gone['f:' + f.id] > (f.at || 0)));
+      if (out.history) out.history = out.history.filter((h) => !(gone['h:' + h.id] > (h.ts || 0)));
     }
     return out;
   }

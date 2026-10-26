@@ -36,6 +36,8 @@ contextBridge.exposeInMainWorld('lift', {
   backupApply: () => ipcRenderer.invoke('backup:apply'),
   backupCancel: () => ipcRenderer.invoke('backup:cancel'),
   syncScan: () => ipcRenderer.invoke('sync:scan'),
+  syncAll: () => ipcRenderer.invoke('sync:all'),
+  syncState: () => ipcRenderer.invoke('sync:state'),
   syncPush: (o) => ipcRenderer.invoke('sync:push', o),
   syncCode: (c) => ipcRenderer.invoke('sync:code', c),
   syncCancel: () => ipcRenderer.invoke('sync:cancel'),

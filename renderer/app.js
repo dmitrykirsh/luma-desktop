@@ -45,6 +45,7 @@ async function initStore() {
   store = (await window.lift.getStore()) || {};
   state.favs = store.favs || [];
   state.history = store.history || [];
+  state.gone = store.gone || {};
   state.seen = store.seen || {};
   state.lists = store.lists || [];
   state.lbRecent = store.lbRecent || [];
@@ -77,10 +78,11 @@ function migrateDone() {
   persist('progress'); window.lift.setStore('doneMigrated', true); store.doneMigrated = true;
 }
 const brief = (it) => ({ id: it.id, type: it.type, name: it.name, origin_name: it.origin_name, poster: it.poster, year: it.year, kp: it.kp_rating, imdb: it.imdb_rating, quality: it.quality });
+const goneMark = (k, id) => { state.gone = state.gone || {}; state.gone[k + ':' + id] = Date.now(); persist('gone'); };
 const isFav = (id) => state.favs.some((f) => f.id === id);
 function toggleFav(it) {
-  if (isFav(it.id)) { state.favs = state.favs.filter((f) => f.id !== it.id); toast('Удалено из избранного'); }
-  else { state.favs.unshift(brief(it)); toast('Добавлено в избранное'); }
+  if (isFav(it.id)) { state.favs = state.favs.filter((f) => f.id !== it.id); goneMark('f', it.id); toast('Удалено из избранного'); }
+  else { state.favs.unshift({ ...brief(it), at: Date.now() }); toast('Добавлено в избранное'); }
   persist('favs'); updateBadges();
   return isFav(it.id);
 }
@@ -497,7 +499,7 @@ async function renderFavs(view) {
   wireCards(view);
   view.onclick = (e) => {
     const d = e.target.closest('[data-del]');
-    if (d) { e.stopPropagation(); state.favs = state.favs.filter((f) => f.id !== +d.dataset.del); persist('favs'); updateBadges(); render(currentRoute); }
+    if (d) { e.stopPropagation(); state.favs = state.favs.filter((f) => f.id !== +d.dataset.del); goneMark('f', +d.dataset.del); persist('favs'); updateBadges(); render(currentRoute); }
   };
 }
 async function renderHistory(view) {
@@ -507,7 +509,7 @@ async function renderHistory(view) {
   wireCards(view);
   view.onclick = (e) => {
     const d = e.target.closest('[data-del]');
-    if (d) { e.stopPropagation(); state.history = state.history.filter((f) => f.id !== +d.dataset.del); persist('history'); render(currentRoute); }
+    if (d) { e.stopPropagation(); state.history = state.history.filter((f) => f.id !== +d.dataset.del); goneMark('h', +d.dataset.del); persist('history'); render(currentRoute); }
   };
 }
 
@@ -868,6 +870,7 @@ $('#plPicker').addEventListener('click', (e) => {
 $('#plPkBack').addEventListener('click', closePicker);
 async function closePlayer() {
   if (!playing) return;
+  setTimeout(() => { try { window.lift.syncAll(); } catch {} }, 3000);   // позиция просмотра уйдёт на другие устройства группы
   document.body.classList.remove('playing');
   clearInterval(progTimer);
   $('#player').classList.add('hidden'); window.lift.win('fs-off');   // окно закрываем сразу, а время считываем из ещё живого видео
@@ -1285,8 +1288,9 @@ async function renderSettings(view) {
       <pre id="dgOut" class="hint" style="display:none;white-space:pre-wrap;user-select:text;margin-top:12px;font-size:13px;line-height:1.6"></pre>
     </section>
     <section class="set-card" id="tvSync">
-      <div class="set-head"><div><h2>Телевизор</h2><p>Синхронизация с Luma на ТВ в домашней сети: избранное, история, прогресс, подборки, каналы и ключи. Без облака и аккаунтов.</p></div></div>
-      <div class="key-row"><button class="btn primary" id="tvFind">Найти телевизор</button></div>
+      <div class="set-head"><div><h2>Синхронизация устройств</h2><p>ПК, ТВ и телефон в одной сети обмениваются избранным, историей, прогрессом, подборками и ключами сами: при запуске, после просмотра и по кнопке. Подключить устройство нужно один раз. Без облака и аккаунтов.</p></div></div>
+      <div class="key-row"><button class="btn primary" id="syncAll">Синхронизировать сейчас</button><button class="btn ghost" id="tvFind">Подключить новое устройство</button></div>
+      <p class="hint" id="syncMsg"></p>
       <div id="tvList" class="bk-box" style="display:none"></div>
     </section>
     <section class="set-card" id="bkCard">
@@ -1374,7 +1378,7 @@ export default {
   };
   $('#dgCopy').onclick = async () => { try { await navigator.clipboard.writeText($('#dgOut').textContent); toast('Отчёт скопирован'); } catch { toast('Не получилось скопировать'); } };
   paintUpdateCard();
-  $('#clrHist').onclick = () => { state.history = []; persist('history'); toast('История очищена'); renderSettings($('#view')); };
+  $('#clrHist').onclick = () => { state.history.forEach((h) => goneMark('h', h.id)); state.history = []; persist('history'); toast('История очищена'); renderSettings($('#view')); };
   $('#clrFav').onclick = () => { state.favs = []; persist('favs'); updateBadges(); toast('Избранное очищено'); renderSettings($('#view')); };
 }
 
@@ -1484,7 +1488,7 @@ document.addEventListener('click', (e) => {
   if (dl && dl.closest('#rHist')) {
     e.stopPropagation();
     const card = dl.closest('.card');
-    state.history = state.history.filter((h) => h.id !== +dl.dataset.del); persist('history');
+    state.history = state.history.filter((h) => h.id !== +dl.dataset.del); goneMark('h', +dl.dataset.del); persist('history');
     card.style.transition = 'opacity .25s, transform .25s'; card.style.opacity = 0; card.style.transform = 'scale(.9)';
     setTimeout(() => { card.remove(); if (!$('#rHist .card')) $('#rHist')?.remove(); }, 260);
     toast('Убрано из «Продолжить просмотр»');
@@ -1570,8 +1574,24 @@ document.addEventListener('click', (e) => {
 
 
 /* ================= синхронизация с ТВ ================= */
+async function syncStateText() {
+  const st = await window.lift.syncState();
+  const when = st.last ? new Date(st.last).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'ещё не было';
+  return st.group ? `Группа устройств подключена · последняя синхронизация: ${when}` : 'Устройства ещё не подключены: нажмите «Подключить новое устройство», найдите ТВ или телефон и введите код с его экрана.';
+}
 function wireTvSync() {
   const list = $('#tvList'), btn = $('#tvFind'); if (!btn) return;
+  const msg = $('#syncMsg'), all = $('#syncAll');
+  syncStateText().then((t) => { if (msg) msg.textContent = t; });
+  all.onclick = async () => {
+    all.disabled = true; msg.className = 'hint'; msg.textContent = 'Ищем устройства в сети…';
+    const r = await window.lift.syncAll(); all.disabled = false;
+    if (r.error === 'NO_GROUP') { msg.className = 'hint bad'; msg.textContent = 'Сначала подключите устройство: «Подключить новое устройство».'; return; }
+    if (r.error === 'BUSY') { msg.textContent = 'Синхронизация уже идёт…'; return; }
+    const ok = (r.peers || []).filter((p) => p.ok).map((p) => p.name);
+    if (ok.length) { await initStore(); await refreshTmdb(); updateBadges(); msg.textContent = 'Готово: ' + ok.join(', ') + '. ' + await syncStateText(); toast('Синхронизация завершена'); }
+    else { msg.className = 'hint bad'; msg.textContent = r.found ? 'Устройства найдены, но обменяться не удалось.' : 'Других устройств группы в сети нет. Включите Luma на ТВ или телефоне.'; }
+  };
   const show = (html) => { list.style.display = ''; list.innerHTML = html; };
   const ERR = { BAD_CODE: 'Код не подошёл: введите код с экрана ТВ.', NETWORK: 'Не получилось связаться с ТВ. Он должен быть включён, а Luma TV открыта на экране Настройки → Синхронизация.', FORMAT: 'Код состоит из 4 цифр.', TIMEOUT: 'ТВ не ответил вовремя.', ERR: 'Не получилось синхронизировать.' };
   btn.onclick = async () => {
