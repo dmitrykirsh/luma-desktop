@@ -145,16 +145,34 @@ const tvApi = require('./tv')({ ipcMain, app, protocol, net, dialog, getStore: (
 findTrailers = require('./trailers')({ getJson, tm: tmApi }).findTrailers;
 const lbApi = require('./lb')({ ipcMain, safeStorage, getStore: () => store, saveStore, getJson, API, getMainWindow: () => win, tm: tmApi });
 
+let driveApi = null;   // вход Google едет между устройствами как секрет «google» (см. drive-sync.js)
 const backupApi = require('./backup')({
   ipcMain, app, getStore: () => store, saveStore, getWindow: () => win,
   secrets: {
     tmdb: { get: tmApi.getKey, set: tmApi.setKey },
     omdb: { get: () => lbApi.getSecret('omdb'), set: (v) => lbApi.setSecret('omdb', v) },
     trakt: { get: () => lbApi.getSecret('trakt'), set: (v) => lbApi.setSecret('trakt', v) },
-    mdblist: { get: () => lbApi.getSecret('mdblist'), set: (v) => lbApi.setSecret('mdblist', v) }
+    mdblist: { get: () => lbApi.getSecret('mdblist'), set: (v) => lbApi.setSecret('mdblist', v) },
+    google: { get: () => (driveApi ? driveApi.getSecret() : ''), set: (v) => { if (driveApi) driveApi.adopt(v); } }
   }
 });
-require('./sync')({ ipcMain, app, safeStorage, getStore: () => store, saveStore, getWindow: () => win, backup: backupApi, reload: () => { if (win && !win.isDestroyed()) win.webContents.send('sync:applied'); } });
+const syncApi = require('./sync')({ ipcMain, app, safeStorage, getStore: () => store, saveStore, getWindow: () => win, backup: backupApi, reload: () => { if (win && !win.isDestroyed()) win.webContents.send('sync:applied'); } });
+driveApi = require('./drive-sync')({ ipcMain, app, shell, safeStorage, getStore: () => store, saveStore, getWindow: () => win, backup: backupApi, reload: () => { if (win && !win.isDestroyed()) win.webContents.send('sync:applied'); } });
+
+// предложить вход Google телевизорам и телефонам в сети: они спросят подтверждение на своём экране
+ipcMain.handle('drive:offer', async () => {
+  const secret = driveApi ? driveApi.getSecret() : '';
+  if (!secret) return { error: 'NO_AUTH' };
+  const peers = (await syncApi.doScan()).filter((p) => p.name !== undefined);
+  const res = [];
+  for (const p of peers) {
+    try {
+      const r = await fetch(`http://${p.ip}:${p.port}/google/offer`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ secret, from: require('os').hostname() }), signal: AbortSignal.timeout(8000) });
+      const j = await r.json(); res.push(j.ok ? { name: p.name, ok: true } : { name: p.name, error: j.error || 'ERR' });
+    } catch { res.push({ name: p.name, error: 'NETWORK' }); }
+  }
+  return { ok: true, peers: res };
+});
 
 ipcMain.handle('api:post', async (_e, p, body) => {
   return apiRequest(p, { method: 'POST', headers: { 'Content-Type': 'application/json', 'User-Agent': UA }, body: JSON.stringify(body) });

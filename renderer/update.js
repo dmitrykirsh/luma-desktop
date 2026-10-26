@@ -27,8 +27,7 @@ function paintUpdateCard() {
   else if (s.status === 'error') { head = 'Не получилось проверить обновления'; body = `<p class="hint bad">${esc(s.error || 'Неизвестная ошибка')}</p>${s.detail ? `<p class="hint" style="margin:0">${esc(s.detail)}</p>` : ''}`; btn = '<button class="btn ghost" id="updCheck">Повторить</button>'; }
   else if (s.status === 'none') { head = 'У вас последняя версия'; body = `<p class="hint">Проверено ${esc(when)}</p>`; btn = '<button class="btn ghost" id="updCheck">Проверить ещё раз</button>'; }
   else { head = 'Обновления'; body = '<p class="hint">Luma проверяет обновления при запуске и раз в 6 часов.</p>'; btn = '<button class="btn ghost" id="updCheck">Проверить обновления</button>'; }
-  box.innerHTML = `<div class="set-head"><div><h2>Обновления</h2><p>Текущая версия: <b>Luma ${esc(s.current)}</b>. Новые версии берутся из релизов на GitHub и ставятся только по вашей кнопке.</p></div></div>
-    <div class="upd-row"><div class="upd-main"><b>${head}</b>${body}</div>${btn}</div>`;
+  box.innerHTML = `<div class="sl"><div class="sr"><div class="sr-t"><b>Обновления</b><small>Текущая версия: Luma ${esc(s.current)}. Новые версии берутся из репозитория проекта на GitHub.</small></div></div><div class="sr"><div class="upd-main sr-t"><b>${head}</b>${body}</div><div class="sr-a">${btn}</div></div></div>`;
   const on = (id, fn) => { const b = $('#' + id); if (b) b.onclick = fn; };
   on('updCheck', () => window.lift.updateCheck());
   on('updDl', () => window.lift.updateDownload());

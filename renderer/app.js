@@ -1159,12 +1159,16 @@ const KEY_CARDS = {
     ], ph: 'Client ID Trakt'
   }
 };
+const SXI = {
+  key: '<svg viewBox="0 0 24 24"><path d="M15 7a4 4 0 1 0-3.9 4.9L4 19v2h3v-2h2v-2h2l2.4-2.4A4 4 0 0 0 15 7z"/></svg>',
+  net: '<svg viewBox="0 0 24 24"><path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M11 18.5a2 2 0 0 1 2 0"/></svg>'
+};
 function keyCardHTML(name, has) {
   const c = KEY_CARDS[name];
-  return `<section class="set-card"><div class="set-head"><div><h2>${esc(c.title)}</h2><p>${esc(c.desc)}</p></div><span class="status ${has ? 'ok' : ''}">${has ? 'Подключено' : 'Не подключено'}</span></div>
+  return `<section class="sx" data-g="keys"><div class="sx-head" data-exp><span class="sx-ic">${SXI.key}</span><div class="sx-t"><b>${esc(c.title)}</b><small>${esc(c.desc)}</small></div><span class="status ${has ? 'ok' : ''}">${has ? 'Подключено' : 'Не подключено'}</span><i class="chev"></i></div><div class="sx-body" hidden>
     <ol class="steps">${c.steps.map((s, i) => `<li><i>${i + 1}</i><div><b>${esc(s[0])}</b><span>${esc(s[1])}</span>${s[2] ? `<button class="pill" data-ext="${s[2][1]}">${esc(s[2][0])} ↗</button>` : ''}</div></li>`).join('')}</ol>
     <div class="key-row"><input id="k-${name}" type="password" placeholder="${has ? '•••••••• (ключ сохранён)' : c.ph}" spellcheck="false" autocomplete="off"><button class="btn primary" id="ks-${name}">Проверить и сохранить</button>${has ? `<button class="btn ghost" id="kd-${name}">Удалить ключ</button>` : ''}</div>
-    <p class="hint" id="km-${name}"></p></section>`;
+    <p class="hint" id="km-${name}"></p></div></section>`;
 }
 function wireKeyCard(name) {
   const inp = $('#k-' + name), msg = $('#km-' + name);
@@ -1181,29 +1185,20 @@ function wireKeyCard(name) {
 }
 /* разделы настроек: каждый показывает только свои карточки, поэтому страница не превращается в длинную ленту */
 const SET_GROUPS = [
-  ['keys', 'Сервисы и ключи', 'TMDB, оценки, подборки', '<path d="M15 7a4 4 0 1 0-3.9 4.9L4 19v2h3v-2h2v-2h2l2.4-2.4A4 4 0 0 0 15 7z"/>'],
-  ['net', 'Связь', 'Обход блокировок и проверка', '<path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M11 18.5a2 2 0 0 1 2 0"/>'],
-  ['look', 'Оформление', 'Заставка и фон', '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.5 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/>'],
-  ['sync', 'ТВ и копии', 'Синхронизация, резервная копия', '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/>'],
-  ['data', 'Данные', 'История, клавиши', '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>'],
-  ['about', 'О приложении', 'Версия и обновления', '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5"/>']
+  ['sync', 'Синхронизация', 'Google, Wi-Fi, резервная копия', '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8"/>', 'Синхронизация', 'История, избранное и ключи следуют за вами на все устройства.'],
+  ['keys', 'Ключи сервисов', 'TMDB, оценки, подборки', '<path d="M15 7a4 4 0 1 0-3.9 4.9L4 19v2h3v-2h2v-2h2l2.4-2.4A4 4 0 0 0 15 7z"/>', 'Ключи сервисов', 'Ключи нужны для подборок, кадров и рейтингов. Они бесплатные, хранятся только на этом компьютере.'],
+  ['net', 'Связь', 'Обход блокировок и проверка', '<path d="M5 12.5a10 10 0 0 1 14 0M8 15.5a6 6 0 0 1 8 0M11 18.5a2 2 0 0 1 2 0"/>', 'Связь', 'Если что-то не грузится из-за блокировок, помогут посредник и проверка.'],
+  ['look', 'Оформление', 'Заставка и фон', '<path d="M12 3l2.6 5.6 6.1.7-4.5 4.2 1.2 6L12 16.5 6.6 19.5l1.2-6L3.3 9.3l6.1-.7z"/>', 'Оформление', 'Заставка при запуске, праздничные подборки и фон.'],
+  ['data', 'Данные', 'История, клавиши', '<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>', 'Данные', 'Что хранится на этом компьютере и как им управлять.'],
+  ['about', 'О приложении', 'Версия и обновления', '<circle cx="12" cy="12" r="9"/><path d="M12 8h.01M11 12h1v5"/>', 'О приложении', 'Версия Luma и обновления.']
 ];
-function setGroupOf(sec) {
-  const id = sec.id;
-  if (id === 'lookCard') return 'look';
-  if (id === 'tmProxyCard' || id === 'diagCard') return 'net';
-  if (id === 'tvSync' || id === 'bkCard') return 'sync';
-  if (id === 'updCard' || sec.classList.contains('about')) return 'about';
-  const h = (sec.querySelector('h2')?.textContent || '');
-  if (/Данные|Горячие/.test(h)) return 'data';
-  return 'keys';
-}
+function setGroupOf(sec) { return sec.dataset.g || 'keys'; }
 function setupSettingsGroups(view) {
   const secs = $$('.set-wrap > section', view);
   secs.forEach((s) => { s.dataset.grp = setGroupOf(s); });
   // длинные пошаговые инструкции сворачиваем: раскрыта только у ещё не подключённого TMDB
   $$('ol.steps', view).forEach((ol, i) => {
-    const card = ol.closest('.set-card'), connected = !!card.querySelector('.status.ok');
+    const card = ol.closest('.sx, .set-card'), connected = !!(card && card.querySelector('.status.ok'));
     const d = document.createElement('details'); d.className = 'set-steps'; d.open = i === 0 && !connected;
     d.innerHTML = '<summary>Как это настроить</summary>'; ol.replaceWith(d); d.appendChild(ol);
   });
@@ -1213,10 +1208,13 @@ function setupSettingsGroups(view) {
     try { localStorage.setItem('luma.setgrp', g); } catch {}
     $$('.set-nav-it', nav).forEach((b) => b.classList.toggle('on', b.dataset.g === g));
     secs.forEach((s) => { s.hidden = s.dataset.grp !== g; });
+    const G = SET_GROUPS.find((x) => x[0] === g); if (G) { $('#setPtT', view).textContent = G[4]; $('#setPtS', view).textContent = G[5]; }
   };
   nav.onclick = (e) => { const b = e.target.closest('.set-nav-it'); if (b) show(b.dataset.g); };
-  let g0 = 'keys'; try { g0 = localStorage.getItem('luma.setgrp') || 'keys'; } catch {}
-  show(SET_GROUPS.some((x) => x[0] === g0) ? g0 : 'keys');
+  view.addEventListener('click', (e) => { const h = e.target.closest('.sx-head'); if (!h) return; const x = h.parentElement; x.classList.toggle('open'); $('.sx-body', x).hidden = !x.classList.contains('open'); });
+  $$('.sx', view).forEach((x) => { if (x.querySelector('.status') && !x.querySelector('.status.ok') && x.querySelector('#tmKey')) { x.classList.add('open'); $('.sx-body', x).hidden = false; } });
+  let g0 = 'sync'; try { g0 = localStorage.getItem('luma.setgrp') || 'sync'; } catch {}
+  show(SET_GROUPS.some((x) => x[0] === g0) ? g0 : 'sync');
 }
 async function renderSettings(view) {
   await refreshTmdb();
@@ -1233,10 +1231,8 @@ async function renderSettings(view) {
   const tmProxyUrl = (await window.lift.tmdbProxyGet()).url || '';
   view.innerHTML = `<div class="page-head"><h1>Настройки</h1></div>
   <div class="set-layout"><nav class="set-nav" id="setNav"></nav>
-  <div class="set-wrap">
-    <section class="set-card">
-      <div class="set-head"><div><h2>TMDB — подборки, кадры и рекомендации</h2><p>The Movie Database — крупнейшая открытая база фильмов. С вашим ключом приложение показывает на главной тренды и лучшие подборки, на странице фильма — настоящие кадры, логотип и рекомендации зрителей. В каталог попадает только то, что есть на Luma.</p></div>
-      <span class="status ${tm.has && !tm.shared ? 'ok' : ''}" id="tmStatus">${tm.shared ? 'Тестовый общий ключ' : tm.has ? 'Подключено' : 'Не подключено'}</span></div>
+  <div class="set-wrap"><div class="set-pt"><h2 id="setPtT"></h2><p id="setPtS"></p></div>
+    <section class="sx" data-g="keys"><div class="sx-head" data-exp><span class="sx-ic">${SXI.key}</span><div class="sx-t"><b>TMDB — подборки, кадры и рекомендации</b><small>The Movie Database — крупнейшая открытая база фильмов. С вашим ключом приложение показывает на главной тренды и лучшие подборки, на странице фильма — настоящие кадры, логотип и рекомендации зрителей. В каталог попадает только то, что есть на Luma.</small></div><span class="status ${tm.has && !tm.shared ? 'ok' : ''}" id="tmStatus">${tm.shared ? 'Тестовый общий ключ' : tm.has ? 'Подключено' : 'Не подключено'}</span><i class="chev"></i></div><div class="sx-body" hidden>
       <ol class="steps">${steps.map((s, i) => `<li><i>${i + 1}</i><div><b>${esc(s[0])}</b><span>${esc(s[1])}</span>${s[2] ? `<button class="pill" data-ext="${s[2][1]}">${esc(s[2][0])} ↗</button>` : ''}</div></li>`).join('')}</ol>
       <div class="key-row"><input id="tmKey" type="password" placeholder="${tm.has && !tm.shared ? '•••••••••••••••• (ключ сохранён)' : 'Вставьте ключ сюда'}" spellcheck="false" autocomplete="off">
         <button class="pill" id="tmShow">Показать</button>
@@ -1245,18 +1241,15 @@ async function renderSettings(view) {
       <p class="hint" id="tmMsg"></p>
       ${tm.shared ? '<p class="hint">Сейчас работает общий тестовый ключ: у него общий лимит, и он может перестать работать. Лучше получить свой: это бесплатно и занимает пару минут (шаги выше). Свой ключ всегда главнее общего.</p>' : ''}
       <p class="hint">Если TMDB не открывается в вашей сети, понадобится VPN: подборки и кадры берутся напрямую с серверов TMDB. Сам каталог и просмотр от этого не зависят.</p>
-    </section>
-    <section class="set-card" id="lookCard">
-      <div class="set-head"><div><h2>Оформление</h2><p>Заставка с анимацией логотипа и звуком при запуске и медленное тёмное переливание фона.</p></div></div>
-      <div class="opt-list">
+    </div></section>
+    <section class="sg" data-g="look" id="lookCard"><p class="sg-d">Заставка с анимацией логотипа и звуком при запуске и медленное тёмное переливание фона.</p>
+      <div class="sl opt-list">
         <div class="opt-row"><div><b>Заставка со звуком</b><span>Анимация логотипа и короткий звук при запуске</span></div><button class="tgl ${optGet('luma.intro', '1') !== '0' ? 'on' : ''}" role="switch" aria-checked="${optGet('luma.intro', '1') !== '0'}" data-opt="intro"><i></i></button></div>
         <div class="opt-row"><div><b>Праздничные подборки</b><span>Баннер с фильмами к Новому году, Хэллоуину, 9 мая и другим датам</span></div><button class="tgl ${optGet('luma.holi', '1') !== '0' ? 'on' : ''}" role="switch" aria-checked="${optGet('luma.holi', '1') !== '0'}" data-opt="holi"><i></i></button></div>
         <div class="opt-row"><div><b>Анимированный фон</b><span>Медленное тёмное переливание за каталогом</span></div><button class="tgl ${optGet('luma.aurora', '1') !== '0' ? 'on' : ''}" role="switch" aria-checked="${optGet('luma.aurora', '1') !== '0'}" data-opt="aurora"><i></i></button></div>
       </div>
     </section>
-    <section class="set-card" id="tmProxyCard">
-      <div class="set-head"><div><h2>TMDB не открывается? Свой адрес-посредник</h2><p>Если провайдер блокирует TMDB, а VPN не хочется, можно бесплатно поднять посредника на Cloudflare Workers за пару минут. Luma будет обращаться к нему, а не к TMDB напрямую.</p></div>
-      <span class="status ${tmProxyUrl ? 'ok' : ''}" id="tpStatus">${tmProxyUrl ? 'Подключён' : 'Не используется'}</span></div>
+    <section class="sx" data-g="net" id="tmProxyCard"><div class="sx-head" data-exp><span class="sx-ic">${SXI.net}</span><div class="sx-t"><b>TMDB не открывается? Свой адрес-посредник</b><small>Если провайдер блокирует TMDB, а VPN не хочется, можно бесплатно поднять посредника на Cloudflare Workers за пару минут. Luma будет обращаться к нему, а не к TMDB напрямую.</small></div><span class="status ${tmProxyUrl ? 'ok' : ''}" id="tpStatus">${tmProxyUrl ? 'Подключён' : 'Не используется'}</span><i class="chev"></i></div><div class="sx-body" hidden>
       <ol class="steps">
         <li><i>1</i><div><b>Зарегистрируйтесь на Cloudflare</b><span>Бесплатный аккаунт на dash.cloudflare.com, карта не нужна.</span><button class="pill" data-ext="https://dash.cloudflare.com/sign-up">Открыть Cloudflare ↗</button></div></li>
         <li><i>2</i><div><b>Создайте Worker</b><span>В меню слева: Compute (Workers) → Create → Create Worker. Любое имя, например luma-tmdb. Нажмите Deploy, затем Edit code.</span></div></li>
@@ -1266,10 +1259,8 @@ async function renderSettings(view) {
       <div class="key-row"><input id="tpUrl" placeholder="https://luma-tmdb.ваше-имя.workers.dev" value="${esc(tmProxyUrl)}" spellcheck="false" autocomplete="off"><button class="btn primary" id="tpSave">Проверить и сохранить</button>${tmProxyUrl ? '<button class="btn ghost" id="tpDel">Отключить</button>' : ''}</div>
       <p class="hint" id="tpMsg"></p>
       <p class="hint">Через посредника идут запросы к TMDB (в том числе ваш ключ), как через любой прокси. Скрипт ничего не хранит и пересылает только адреса TMDB.</p>
-    </section>
-    <section class="set-card">
-      <div class="set-head"><div><h2>Rotten Tomatoes и Metacritic (по желанию)</h2><p>Оценки критиков берутся из бесплатного сервиса OMDb. Для рейтинга Letterboxd отдельный ключ не нужен, а вот для него и для оценок критиков нужен подключённый ключ TMDB. Без ключа OMDb страница фильма просто покажет меньше оценок.</p></div>
-      <span class="status ${omHas ? 'ok' : ''}">${omHas ? 'Подключено' : 'Не подключено'}</span></div>
+    </div></section>
+    <section class="sx" data-g="keys"><div class="sx-head" data-exp><span class="sx-ic">${SXI.key}</span><div class="sx-t"><b>Rotten Tomatoes и Metacritic (по желанию)</b><small>Оценки критиков берутся из бесплатного сервиса OMDb. Для рейтинга Letterboxd отдельный ключ не нужен, а вот для него и для оценок критиков нужен подключённый ключ TMDB. Без ключа OMDb страница фильма просто покажет меньше оценок.</small></div><span class="status ${omHas ? 'ok' : ''}">${omHas ? 'Подключено' : 'Не подключено'}</span><i class="chev"></i></div><div class="sx-body" hidden>
       <ol class="steps">${[
         ['Откройте страницу получения ключа OMDb', 'Бесплатный тариф даёт 1000 запросов в сутки — этого хватает с запасом.', ['Открыть omdbapi.com', 'https://www.omdbapi.com/apikey.aspx']],
         ['Выберите тариф FREE и заполните форму', 'Укажите свою почту, имя и в поле «Use» — что-нибудь вроде «personal desktop app». Нажмите Submit.'],
@@ -1278,33 +1269,30 @@ async function renderSettings(view) {
       ].map((s, i) => `<li><i>${i + 1}</i><div><b>${esc(s[0])}</b><span>${esc(s[1])}</span>${s[2] ? `<button class="pill" data-ext="${s[2][1]}">${esc(s[2][0])} ↗</button>` : ''}</div></li>`).join('')}</ol>
       <div class="key-row"><input id="omKey" type="password" placeholder="${omHas ? '•••••••• (ключ сохранён)' : 'Ключ OMDb'}" spellcheck="false" autocomplete="off"><button class="btn primary" id="omSave">Проверить и сохранить</button>${omHas ? '<button class="btn ghost" id="omDel">Удалить ключ</button>' : ''}</div>
       <p class="hint" id="omMsg"></p>
-    </section>
+    </div></section>
     ${keyCardHTML('mdblist', ks.mdblist)}
     ${keyCardHTML('trakt', ks.trakt)}
 
-    <section class="set-card" id="diagCard">
-      <div class="set-head"><div><h2>Проверка связи</h2><p>Если что-то не грузится (поиск, кадры, рейтинги, трейлеры), нажмите кнопку: Luma проверит нужные сервисы и покажет отчёт, который можно скопировать и отправить. Ключи в отчёт не попадают.</p></div></div>
-      <div class="key-row"><button class="btn primary" id="dgRun">Проверить</button><button class="btn ghost" id="dgCopy" style="display:none">Скопировать отчёт</button></div>
+    <section class="sg" data-g="net" id="diagCard"><div class="sl"><div class="sr"><div class="sr-t"><b>Проверка связи</b><small>Если что-то не грузится (поиск, кадры, рейтинги, трейлеры), нажмите кнопку: Luma проверит нужные сервисы и покажет отчёт, который можно скопировать и отправить. Ключи в отчёт не попадают.</small></div><div class="sr-a"><button class="btn primary" id="dgRun">Проверить</button><button class="btn ghost" id="dgCopy" style="display:none">Скопировать отчёт</button></div></div></div>
+      
       <pre id="dgOut" class="hint" style="display:none;white-space:pre-wrap;user-select:text;margin-top:12px;font-size:13px;line-height:1.6"></pre>
     </section>
-    <section class="set-card" id="tvSync">
-      <div class="set-head"><div><h2>Синхронизация устройств</h2><p>ПК, ТВ и телефон в одной сети обмениваются избранным, историей, прогрессом, подборками и ключами сами: при запуске, после просмотра и по кнопке. Подключить устройство нужно один раз. Без облака и аккаунтов.</p></div></div>
-      <div class="key-row"><button class="btn primary" id="syncAll">Синхронизировать сейчас</button><button class="btn ghost" id="tvFind">Подключить новое устройство</button></div>
+    <section class="sg" data-g="sync" data-t="Аккаунт Google" id="driveSync"><p class="sg-d">История, избранное, прогресс серий, подборки и ключи сервисов хранятся в вашем Google Диске и синхронизируются сами — при запуске, раз в 5 минут и по кнопке, из любой сети, не только домашней.</p><div class="sl"><div id="driveRow"></div></div><p class="hint" id="driveMsg"></p></section>
+    <section class="sg" data-g="sync" data-t="Локальная сеть" id="tvSync"><div class="sl"><div class="sr"><div class="sr-t"><b>Синхронизация без аккаунта</b><small>Без аккаунта: ПК, ТВ и телефон в одной сети обмениваются данными сами, пока в ней остаются. Подключить устройство нужно один раз.</small></div><div class="sr-a"><button class="btn primary" id="syncAll">Синхронизировать сейчас</button><button class="btn ghost" id="tvFind">Подключить новое устройство</button></div></div></div>
+      
       <p class="hint" id="syncMsg"></p>
       <div id="tvList" class="bk-box" style="display:none"></div>
     </section>
-    <section class="set-card" id="bkCard">
-      <div class="set-head"><div><h2>Резервная копия</h2><p>Один файл с избранным, историей просмотров, подборками, прогрессом по сериям, настройками и всеми ключами (TMDB, OMDb, MDBList, Trakt). После переустановки или на другом компьютере достаточно импортировать этот файл.</p></div></div>
-      <div class="key-row"><button class="btn primary" id="bkExp">Экспорт…</button><button class="btn ghost" id="bkImp">Импорт…</button></div>
+    <section class="sg" data-g="sync" data-t="Резервная копия" id="bkCard"><div class="sl"><div class="sr"><div class="sr-t"><b>Файл с данными (.luma)</b><small>Один файл с избранным, историей просмотров, подборками, прогрессом по сериям, настройками и всеми ключами (TMDB, OMDb, MDBList, Trakt). После переустановки или на другом компьютере достаточно импортировать этот файл.</small></div><div class="sr-a"><button class="btn primary" id="bkExp">Экспорт…</button><button class="btn ghost" id="bkImp">Импорт…</button></div></div></div>
+      
       <div id="bkArea"></div>
     </section>
-    <section class="set-card">
-      <div class="set-head"><div><h2>Данные на этом компьютере</h2><p>Избранное: ${state.favs.length} · История: ${state.history.length}. Всё хранится локально.</p></div></div>
-      <div class="key-row"><button class="btn ghost" id="clrHist">Очистить историю</button><button class="btn ghost" id="clrFav">Очистить избранное</button></div>
+    <section class="sg" data-g="data"><div class="sl"><div class="sr"><div class="sr-t"><b>Данные на этом компьютере</b><small>Избранное: ${state.favs.length} · История: ${state.history.length}. Всё хранится локально.</small></div><div class="sr-a"><button class="btn ghost" id="clrHist">Очистить историю</button><button class="btn ghost" id="clrFav">Очистить избранное</button></div></div></div>
+      
     </section>
-    <section class="set-card"><div class="set-head"><div><h2>Горячие клавиши</h2><p><kbd>Ctrl K</kbd> поиск · <kbd>Alt ←</kbd>/<kbd>Alt →</kbd> или боковые кнопки мыши — назад/вперёд · <kbd>Esc</kbd> закрыть · <kbd>F</kbd> полный экран в плеере</p></div></div></section>
-    <section class="set-card" id="updCard"></section>
-    <section class="set-card about"><div id="aboutLogo"></div><div><p class="slogan">Включи свою историю</p><p class="hint" style="margin-top:6px" id="aboutVer"></p></div></section>
+    <section class="sg" data-g="data"><div class="sl"><div class="sr"><div class="sr-t"><b>Горячие клавиши</b><small><kbd>Ctrl K</kbd> поиск · <kbd>Alt ←</kbd>/<kbd>Alt →</kbd> или боковые кнопки мыши — назад/вперёд · <kbd>Esc</kbd> закрыть · <kbd>F</kbd> полный экран в плеере</small></div></div></div></section>
+    <section class="sg" data-g="about" id="updCard"></section>
+    <section class="sg about" data-g="about"><div class="sl"><div class="sr"><div id="aboutLogo"></div><div><p class="slogan">Включи свою историю</p><p class="hint" style="margin-top:6px" id="aboutVer"></p></div></div></div></section>
   </div></div>`;
   setupSettingsGroups(view);
   const msg = $('#tmMsg'), inp = $('#tmKey');
@@ -1371,6 +1359,7 @@ export default {
   window.lift.appInfo().then((i) => { const el = $('#aboutVer'); if (el) el.textContent = 'Luma · версия ' + i.version; });
   wireBackup();
   wireTvSync();
+  wireDriveSync();
   $('#dgRun').onclick = async () => {
     const b = $('#dgRun'), out = $('#dgOut'); b.disabled = true; b.textContent = 'Проверяем…'; out.style.display = ''; out.textContent = 'Это займёт до 15 секунд…';
     const r = await window.lift.diagRun().catch(() => ({ text: 'Проверка не удалась' }));
@@ -1625,3 +1614,67 @@ window.lift.onSyncRequest((d) => {
 });
 window.lift.onSyncRequestEnd(() => $('#tvAsk')?.remove());
 window.lift.onSyncApplied(async () => { await initStore(); await refreshTmdb(); updateBadges(); });
+
+/* ================= синхронизация через Google Drive ================= */
+function driveStateText(st) {
+  if (!st.connected) return 'Не подключено.';
+  const when = st.last ? new Date(st.last).toLocaleString('ru', { day: 'numeric', month: 'long', hour: '2-digit', minute: '2-digit' }) : 'ещё не было';
+  return `Подключено · последняя синхронизация: ${when}`;
+}
+async function wireDriveSync() {
+  const row = $('#driveRow'), msg = $('#driveMsg'); if (!row) return;
+  const DRIVE_ERR = { NO_CREDS: 'Не настроены ключи Google в этой сборке.', NETWORK: 'Нет связи с Google — проверьте интернет.', DEVICE: 'Google не выдал код входа, попробуйте ещё раз.', NO_AUTH: 'Сессия истекла, войдите заново.', BUSY: 'Уже выполняется.' };
+  const plate = (st) => {
+    const on = !!(st && st.connected), nm = on ? (st.name || 'Google-аккаунт') : 'Google-аккаунт';
+    const av = `<span class="g-av ${on ? '' : 'off'}"><i>${esc(on ? nm.trim().charAt(0).toUpperCase() : 'G')}</i>${on && st.photo ? `<img src="${esc(st.photo)}" referrerpolicy="no-referrer" onerror="this.remove()">` : ''}</span>`;
+    return `<div class="g-plate">${av}<div class="g-nm"><b>${esc(nm)}</b><small>${esc(on ? (st.email || 'Подключено') : 'Не подключено')}</small></div><span class="status ${on ? 'ok' : ''}">${on ? 'Подключено' : 'Не подключено'}</span></div>`;
+  };
+  const renderDisconnected = async () => {
+    row.innerHTML = plate(null) + '<div class="g-acts"><button class="btn primary" id="driveConnect">Войти через Google</button></div>';
+    msg.className = 'hint'; msg.textContent = 'Вход откроется в браузере. Потом он сам передастся ТВ и телефону, когда они окажутся с этим компьютером в одной сети.';
+    $('#driveConnect').onclick = async () => {
+      $('#driveConnect').disabled = true; msg.textContent = 'Открываем браузер…';
+      const r = await window.lift.driveConnect();
+      if (r.error) { msg.className = 'hint bad'; msg.textContent = DRIVE_ERR[r.error] || 'Не получилось начать вход.'; $('#driveConnect').disabled = false; return; }
+      row.innerHTML = plate(null) + '<div class="g-acts"><button class="btn ghost" id="driveOpenAgain">Открыть браузер ещё раз</button><button class="btn ghost" id="driveCancel">Отменить</button></div>';
+      msg.className = 'hint'; msg.textContent = 'В браузере открылась страница входа Google: выберите аккаунт и нажмите «Разрешить». Приложение получит доступ только к своим файлам на Диске.';
+      $('#driveOpenAgain').onclick = () => { try { window.lift.openExternal(r.url); } catch {} };
+      $('#driveCancel').onclick = async () => { await window.lift.driveConnectCancel(); renderDisconnected(); };
+    };
+  };
+  const renderConnected = (st) => {
+    row.innerHTML = plate(st) + '<div class="g-acts"><button class="btn primary" id="driveSyncNow">Синхронизировать сейчас</button><button class="btn ghost" id="driveOffer">Передать вход на ТВ</button><button class="btn ghost" id="driveOff">Отключить</button><button class="btn ghost" id="driveWipe">Удалить данные с Диска</button></div>';
+    msg.className = 'hint'; msg.textContent = driveStateText(st) + '. Данные хранятся в вашем Google Диске.';
+    if (!st.name) window.lift.driveSync().then(async () => { const s2 = await window.lift.driveState(); if (s2.connected && s2.name && $('#driveRow')) renderConnected(s2); });
+    $('#driveSyncNow').onclick = async () => {
+      $('#driveSyncNow').disabled = true; msg.textContent = 'Синхронизируем…';
+      const r = await window.lift.driveSync(); $('#driveSyncNow').disabled = false;
+      if (r.error) { msg.className = 'hint bad'; msg.textContent = DRIVE_ERR[r.error] || 'Не получилось синхронизировать.'; return; }
+      await initStore(); await refreshTmdb(); updateBadges();
+      const s2 = await window.lift.driveState(); renderConnected(s2); toast('Синхронизация завершена');
+    };
+    $('#driveOffer').onclick = async () => {
+      msg.className = 'hint'; msg.textContent = 'Ищем ТВ и телефоны в сети…';
+      const r = await window.lift.driveOffer();
+      const ok = (r.peers || []).filter((p) => p.ok).map((p) => p.name);
+      msg.textContent = ok.length ? 'Предложили вход: ' + ok.join(', ') + '. Подтвердите на экране ТВ.' : (r.peers && r.peers.length ? 'Устройства найдены, но вход принять не смогли (возможно, уже вошли).' : 'ТВ в этой сети не найден. Включите Luma на ТВ.');
+    };
+    $('#driveOff').onclick = async () => { await window.lift.driveDisconnect(); renderDisconnected(); };
+    let armed = false;
+    $('#driveWipe').onclick = async () => {
+      if (!armed) { armed = true; $('#driveWipe').textContent = 'Нажмите ещё раз: удалить с Диска и отключить'; return; }
+      msg.className = 'hint'; msg.textContent = 'Удаляем файл с Диска…';
+      const r = await window.lift.driveDeleteRemote();
+      if (r.error) { armed = false; $('#driveWipe').textContent = 'Удалить данные с Диска'; msg.className = 'hint bad'; msg.textContent = 'Не получилось удалить файл с Диска. Проверьте интернет.'; return; }
+      toast('Файл удалён с Google Диска, вход отключён'); renderDisconnected();
+    };
+  };
+  const st = await window.lift.driveState();
+  if (st.connected) renderConnected(st); else renderDisconnected();
+}
+window.lift.onDriveConnected(async (d) => {
+  if (currentRoute?.name !== 'settings') return;
+  if (d.error) { const msg = $('#driveMsg'); if (msg) { msg.className = 'hint bad'; msg.textContent = 'Вход не удался, попробуйте ещё раз.'; } return;}
+  await initStore(); await refreshTmdb(); updateBadges();
+  toast('Google-аккаунт подключён'); renderSettings($('#view')); setTimeout(() => { try { window.lift.driveOffer(); } catch {} }, 2500);
+});

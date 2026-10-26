@@ -185,4 +185,5 @@ module.exports = function initSync({ ipcMain, app, getWindow, backup, reload, ge
   ipcMain.handle('sync:state', () => { const g = getGroup(); return { group: !!g, gid: g ? g.id : '', did: did(), name: name(), last: lastSync, peers: lastPeers }; });
   app.whenReady().then(() => { start(); setTimeout(() => syncAll().catch(() => {}), 6000); setInterval(() => syncAll().catch(() => {}), 5 * 60 * 1000); });
   app.on('before-quit', () => { try { udp && udp.close(); } catch {} try { srv && srv.close(); } catch {} });
+  return { doScan };
 };

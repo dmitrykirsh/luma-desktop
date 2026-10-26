@@ -69,7 +69,8 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
     if (Object.keys(gone).length) {
       out.gone = gone;
       if (out.favs) out.favs = out.favs.filter((f) => !(gone['f:' + f.id] > (f.at || 0)));
-      if (out.history) out.history = out.history.filter((h) => !(gone['h:' + h.id] > (h.ts || 0)));
+      const prog = out.progress || cur.progress || {};   // был просмотр позже удаления: запись остаётся
+      if (out.history) out.history = out.history.filter((h) => !(gone['h:' + h.id] > (h.ts || 0) && !Object.entries(prog).some(([k, p]) => k.startsWith(h.id + ':') && (p.ts || 0) > gone['h:' + h.id])));
     }
     return out;
   }
