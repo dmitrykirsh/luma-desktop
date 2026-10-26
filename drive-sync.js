@@ -22,7 +22,9 @@ let CREDS = null;
 function creds(kind) {
   if (!CREDS) {
     try {
-      const j = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'sync-credentials.local.json'), 'utf8'));
+      // в собранном приложении ключи лежат в drive-creds.json (его кладёт сборка из локального файла вне репозитория), при разработке читаем общий файл
+    const f = [path.join(__dirname, 'drive-creds.json'), path.join(__dirname, '..', 'sync-credentials.local.json')].find((x) => fs.existsSync(x));
+    const j = JSON.parse(fs.readFileSync(f, 'utf8'));
       CREDS = { desktop: { id: j.desktop.clientId, secret: j.desktop.clientSecret }, tv: { id: j.tvAndLauncher.clientId, secret: j.tvAndLauncher.clientSecret } };
     } catch { CREDS = { desktop: { id: '', secret: '' }, tv: { id: '', secret: '' } }; }
   }
