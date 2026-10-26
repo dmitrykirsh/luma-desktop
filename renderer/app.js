@@ -1593,7 +1593,7 @@ function wireTvSync() {
     else { msg.className = 'hint bad'; msg.textContent = r.found ? 'Устройства найдены, но обменяться не удалось.' : 'Других устройств группы в сети нет. Включите Luma на ТВ или телефоне.'; }
   };
   const show = (html) => { list.style.display = ''; list.innerHTML = html; };
-  const ERR = { BAD_CODE: 'Код не подошёл: введите код с экрана ТВ.', NETWORK: 'Не получилось связаться с ТВ. Он должен быть включён, а Luma TV открыта на экране Настройки → Синхронизация.', FORMAT: 'Код состоит из 4 цифр.', TIMEOUT: 'ТВ не ответил вовремя.', ERR: 'Не получилось синхронизировать.' };
+  const ERR = { BAD_CODE: 'Код не подошёл: введите код с экрана устройства.', NETWORK: 'Не получилось связаться с устройством. Оно должно быть включено, а Luma открыта на экране «Синхронизация».', FORMAT: 'Код состоит из 4 цифр.', TIMEOUT: 'ТВ не ответил вовремя.', ERR: 'Не получилось синхронизировать.' };
   btn.onclick = async () => {
     btn.disabled = true; show('<div class="spin"></div>');
     const tvs = await window.lift.syncScan(); btn.disabled = false;
@@ -1609,9 +1609,10 @@ function wireTvSync() {
   };
 }
 // ТВ нашёл этот компьютер и прислал данные: спрашиваем код с экрана ТВ
-window.lift.onSyncRequest(() => {
+window.lift.onSyncRequest((d) => {
   $('#tvAsk')?.remove();
-  document.body.insertAdjacentHTML('beforeend', `<div id="tvAsk" style="position:fixed;inset:0;z-index:9999;background:rgba(5,6,8,.7);display:grid;place-items:center"><div class="set-card" style="width:420px;margin:0"><div class="set-head"><div><h2>Телевизор хочет синхронизироваться</h2><p>Введите код, показанный на экране ТВ.</p></div></div>
+  const who = (d && d.from) || 'Устройство';
+  document.body.insertAdjacentHTML('beforeend', `<div id="tvAsk" style="position:fixed;inset:0;z-index:9999;background:rgba(5,6,8,.7);display:grid;place-items:center"><div class="set-card" style="width:420px;margin:0"><div class="set-head"><div><h2>«${esc(who)}» хочет синхронизироваться</h2><p>Введите код, показанный на экране этого устройства.</p></div></div>
     <div class="key-row"><input id="tvAskCode" inputmode="numeric" maxlength="4" placeholder="Код" style="width:140px"><button class="btn primary" id="tvAskOk">Подтвердить</button><button class="btn ghost" id="tvAskNo">Отклонить</button></div><p class="hint" id="tvAskMsg"></p></div></div>`);
   $('#tvAskCode').focus();
   const go = async () => {

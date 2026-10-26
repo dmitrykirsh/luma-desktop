@@ -84,7 +84,7 @@ module.exports = function initSync({ ipcMain, app, getWindow, backup, reload, ge
         if (pendingIn) { try { pendingIn.res.writeHead(200, cors); pendingIn.res.end('{"error":"BUSY"}'); } catch {} }
         const mine = { body, res, cors, tries: 0 };
         pendingIn = mine;
-        send('sync:request', { from: 'ТВ' });   // окно в приложении спросит код с экрана ТВ
+        send('sync:request', { from: String(body.name || '').slice(0, 60) || 'Устройство' });   // окно в приложении спросит код с экрана ТВ
         setTimeout(() => { if (pendingIn === mine) { try { res.writeHead(200, cors); res.end('{"error":"TIMEOUT"}'); } catch {} pendingIn = null; send('sync:request-end'); } }, 110000);
       });
     });

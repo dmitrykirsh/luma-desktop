@@ -1,7 +1,7 @@
 {
   "name": "luma-desktop",
   "productName": "Luma",
-  "version": "2.13.0",
+  "version": "2.13.1",
   "description": "Luma — кинотеатр для Windows. Включи свою историю",
   "main": "main.js",
   "scripts": {
