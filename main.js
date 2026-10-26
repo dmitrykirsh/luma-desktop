@@ -186,6 +186,14 @@ ipcMain.handle('player:time', async () => {
     return await fr.executeJavaScript("(() => { const v = document.querySelector('video'); return v && isFinite(v.duration) ? { t: v.currentTime, d: v.duration, p: v.paused } : null; })()");
   } catch { return null; }
 });
+// Автозапуск: после «Смотреть» нажимать «play» вручную не нужно. Политика автовоспроизведения у окна открыта, поэтому достаточно video.play() внутри iframe плеера
+ipcMain.handle('player:autoplay', async () => {
+  try {
+    const fr = win.webContents.mainFrame.framesInSubtree.find((f) => /^https:\/\/embed\./.test(f.url));
+    if (!fr) return 'noframe';
+    return await fr.executeJavaScript("(() => { const v = document.querySelector('video'); if (!v) return 'novideo'; if (!v.paused) return 'playing'; const p = v.play(); if (p && p.catch) p.catch(() => {}); return 'tried'; })()");
+  } catch { return 'err'; }
+});
 ipcMain.handle('trailers', (_e, q) => findTrailers(q));
 ipcMain.handle('store:get', () => store);
 ipcMain.handle('store:set', (_e, k, v) => { store[k] = v; saveStore(); });

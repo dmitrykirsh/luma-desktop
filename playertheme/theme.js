@@ -7,6 +7,24 @@ if (!window.__lumaTheme) {
   catch (e) { const s = document.createElement('style'); s.textContent = FONTS + CSS; (document.head || document.documentElement).appendChild(s); }
 
   const video = () => document.querySelector('video');
+  /** Громкость и «без звука»: родной плеер сайта сразу возвращает video.volume = 1 и muted = false (слушает volumechange), поэтому штатные свойства не держатся.
+      Ведём звук через Web Audio: видео отдаёт звук в узел громкости, а свойства самого video плеер может трогать как хочет. Только для потоков blob: (MSE) —
+      с чужого адреса без CORS звук бы пропал, там остаётся прежний способ. */
+  let aud = null;
+  const audio = () => {
+    const v = video(); if (!v) return null;
+    if (aud && aud.v === v) return aud.gain ? aud : null;
+    aud = { v, vol: 1, muted: false };
+    if (!/^blob:/.test(v.currentSrc || '')) return null;
+    try {
+      const ctx = new (window.AudioContext || window.webkitAudioContext)();
+      const gain = ctx.createGain(); ctx.createMediaElementSource(v).connect(gain); gain.connect(ctx.destination);
+      aud.ctx = ctx; aud.gain = gain;
+    } catch { aud.gain = null; }
+    return aud.gain ? aud : null;
+  };
+  window.__lumaAudio = () => (aud && aud.gain ? { vol: aud.vol, muted: aud.muted, gain: aud.gain.gain.value, ctx: aud.ctx.state } : null);
+  const applyAudio = () => { const a = aud; if (!a || !a.gain) return; a.gain.gain.value = a.muted ? 0 : a.vol; if (a.ctx.state === 'suspended') a.ctx.resume().catch(() => {}); };
   const post = (o) => { try { parent.postMessage(Object.assign({ luma: 1 }, o), '*'); } catch {} };
   const ctrl = () => { try { return window.app && window.app._settings && window.app._settings.ctrl; } catch { return null; } };
   const setting = (c, k) => { try { const s = c && c[k], l = c && c.ls && c.ls[k]; return s && l ? { v: s.value, ls: l.value } : null; } catch { return null; } };
@@ -52,7 +70,7 @@ if (!window.__lumaTheme) {
     try { for (let i = 0; i < v.buffered.length; i++) if (v.buffered.start(i) <= v.currentTime + 0.5 && v.buffered.end(i) >= v.currentTime) buf = v.buffered.end(i); } catch {}
     const c = ctrl();
     return {
-      t: v.currentTime, d: isFinite(v.duration) ? v.duration : 0, p: v.paused, e: v.ended, vol: v.volume, m: v.muted, buf,
+      t: v.currentTime, d: isFinite(v.duration) ? v.duration : 0, p: v.paused, e: v.ended, vol: aud && aud.gain ? aud.vol : v.volume, m: aud && aud.gain ? aud.muted : v.muted, buf,
       wait: !v.paused && v.readyState < 3, w: v.videoWidth, h: v.videoHeight,
       q: setting(c, 'quality'), snd: setting(c, 'sound'), cc: setting(c, 'cc'), sp: setting(c, 'speed'), fit: setting(c, 'fit'),
       nx: nextInfo(), err: errShown(), th: thumbInfo(), sub: subText()
@@ -70,8 +88,8 @@ if (!window.__lumaTheme) {
         case 'play': a ? a.play() : v && v.play(); break;
         case 'pause': a ? a.pause() : v && v.pause(); break;
         case 'seek': if (v) { const t = Math.max(0, Math.min(Number(m.t) || 0, (v.duration || 0) - 0.3)); a ? a.seek(t) : (v.currentTime = t); } break;
-        case 'vol': if (v) { v.volume = Math.max(0, Math.min(1, Number(m.v))); if (v.volume > 0) v.muted = false; } break;
-        case 'mute': if (v) v.muted = m.v === undefined ? !v.muted : !!m.v; break;
+        case 'vol': { const x = Math.max(0, Math.min(1, Number(m.v))), au = audio(); if (au) { au.vol = x; if (x > 0) au.muted = false; applyAudio(); } else if (v) { v.volume = x; if (x > 0) v.muted = false; } break; }
+        case 'mute': { const au = audio(); if (au) { au.muted = m.v === undefined ? !au.muted : !!m.v; applyAudio(); } else if (v) v.muted = m.v === undefined ? !v.muted : !!m.v; break; }
         case 'set': { const c = ctrl(); if (c && c[m.k]) c[m.k].value = m.v; break; }
         case 'cancelNext': { const b = document.querySelector('[class*="cancel_"]'); if (b) b.click(); break; }
         case 'nextNow': { const b = document.querySelector('button.episode-next'); if (b) b.click(); break; }

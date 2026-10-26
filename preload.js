@@ -48,6 +48,7 @@ contextBridge.exposeInMainWorld('lift', {
   driveConnectCancel: () => ipcRenderer.invoke('drive:connect-cancel'),
   driveDisconnect: () => ipcRenderer.invoke('drive:disconnect'),
   driveSync: () => ipcRenderer.invoke('drive:sync'),
+  playerAutoplay: () => ipcRenderer.invoke('player:autoplay'),
   driveOffer: () => ipcRenderer.invoke('drive:offer'),
   driveDeleteRemote: () => ipcRenderer.invoke('drive:delete-remote'),
   driveState: () => ipcRenderer.invoke('drive:state'),

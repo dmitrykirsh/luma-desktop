@@ -809,6 +809,19 @@ function playItem(d, seasons, season, episode, opts = {}) {
   fr.src = url;
   renderEpsBar();
   PL.open(resume ? resume.t : 0);
+  autoplayWatch();
+}
+// после «Смотреть» запускаем воспроизведение сами: ждём, пока в плеере появится видео, и вызываем play() (до 20 секунд, потом оставляем как есть)
+let apTok = 0;
+function autoplayWatch() {
+  const tok = ++apTok; let n = 0;
+  const tick = async () => {
+    if (tok !== apTok || !playing) return;
+    const r = await window.lift.playerAutoplay().catch(() => 'err');
+    if (r === 'playing' || ++n > 40) return;
+    setTimeout(tick, 500);
+  };
+  setTimeout(tick, 1000);
 }
 const CHEV = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
 const SKIP_PREV = '<svg viewBox="0 0 24 24"><path d="M6 5v14M19 5.500v13L9 12z"/></svg>';
