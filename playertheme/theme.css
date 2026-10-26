@@ -14,3 +14,7 @@ html,body{background:#000}
 [class*="blob_"]{background:var(--l-rose)!important}
 [class*="blob_"]:nth-child(2){background:var(--l-gold)!important}
 [class*="error_"] [class*="caption_"]{font-weight:600}
+
+/* родные субтитры браузера прячем: Luma рисует их сама */
+video::-webkit-media-text-track-container{display:none!important}
+video::cue{color:transparent!important;background:transparent!important;text-shadow:none!important}

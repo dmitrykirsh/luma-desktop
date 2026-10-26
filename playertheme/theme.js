@@ -35,6 +35,17 @@ if (!window.__lumaTheme) {
     } catch {}
     return thumb;
   };
+  /** Субтитры рисует оболочка Luma: родную отрисовку браузера прячет CSS, а режим дорожек не трогаем (плеер сразу сбрасывает субтитры, если ни одна дорожка не показывается). */
+  const subsHooked = new WeakSet();
+  const subText = () => {
+    const v = video(); if (!v) return '';
+    let out = '';
+    for (const t of v.textTracks) {
+      if (!subsHooked.has(t)) { subsHooked.add(t); t.addEventListener('cuechange', () => post({ sub: subText() })); }
+      if (t.mode === 'showing' && t.activeCues) out = [...t.activeCues].map((q) => q.text).join(String.fromCharCode(10));
+    }
+    return out;
+  };
   const snap = () => {
     const v = video(); if (!v) return null;
     let buf = 0;
@@ -44,7 +55,7 @@ if (!window.__lumaTheme) {
       t: v.currentTime, d: isFinite(v.duration) ? v.duration : 0, p: v.paused, e: v.ended, vol: v.volume, m: v.muted, buf,
       wait: !v.paused && v.readyState < 3, w: v.videoWidth, h: v.videoHeight,
       q: setting(c, 'quality'), snd: setting(c, 'sound'), cc: setting(c, 'cc'), sp: setting(c, 'speed'), fit: setting(c, 'fit'),
-      nx: nextInfo(), err: errShown(), th: thumbInfo()
+      nx: nextInfo(), err: errShown(), th: thumbInfo(), sub: subText()
     };
   };
   setInterval(() => { const s = snap(); if (s) post({ st: s }); }, 250);

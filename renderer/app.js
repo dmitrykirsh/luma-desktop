@@ -802,7 +802,7 @@ function playItem(d, seasons, season, episode, opts = {}) {
   if (resume) toast('Продолжаем с ' + fmtTime(resume.t));
   const fr = $('#plFrame');
   const hideLoader = () => $('.pl-loader').classList.add('done');
-  fr.onload = () => setTimeout(hideLoader, 300);
+  fr.onload = () => setTimeout(hideLoader, 1200);   // тема уже внедрена к этому моменту, заставка Luma закрывает остатки загрузки
   clearTimeout(loaderT); loaderT = setTimeout(hideLoader, 3500);   // на случай, если страница плеера досчитывает счётчики слишком долго
   fr.src = url;
   renderEpsBar();

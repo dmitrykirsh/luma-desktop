@@ -219,6 +219,8 @@ function createWindow() {
   win.webContents.on('leave-html-full-screen', () => { htmlFs = false; });
   win.webContents.on('before-input-event', onInput);
   win.webContents.on('did-frame-finish-load', (_e, isMain, pid, rid) => { if (!isMain) injectPlayerTheme(webFrameMain.fromId(pid, rid)); });
+  // тему вешаем уже при открытии страницы плеера, до первой отрисовки, иначе на секунду мелькает его родной интерфейс
+  win.webContents.on('did-frame-navigate', (_e, _url, _code, _text, isMain, pid, rid) => { if (!isMain) injectPlayerTheme(webFrameMain.fromId(pid, rid)); });
   win.on('app-command', (_e, cmd) => { if (cmd === 'browser-backward' && leaveFullscreen()) return; });
   win.on('maximize', () => win.webContents.send('win-state', { max: true }));
   win.on('unmaximize', () => win.webContents.send('win-state', { max: false }));

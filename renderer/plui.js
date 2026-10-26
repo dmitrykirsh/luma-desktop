@@ -91,6 +91,7 @@ const PL = (() => {
     $('#lpWait').classList.toggle('on', !!s.wait && !s.e);
     root().classList.toggle('noui', !!s.err);
     paintNext(s.nx);
+    paintSub(s.cc && s.cc.v === 'Откл' ? '' : s.sub);
     if (s.d > 0) $('.pl-loader').classList.add('done');
   }
 
@@ -135,6 +136,22 @@ const PL = (() => {
     if (pop) paintPop();
   }
 
+  /* ---------- субтитры ---------- */
+  const SUB_SIZES = [['s', 'Мелкие'], ['m', 'Обычные'], ['l', 'Крупные']];
+  let subSize = lsGet('pl.subsize', 'm'), subLast = null;
+  const applySubSize = () => { root().dataset.sub = subSize; };
+  // реплика приходит как текст из VTT: оставляем только курсив, жирный и подчёркивание, остальное убираем
+  function subHtml(t) {
+    return String(t || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/&lt;(\/?)(i|b|u)>/gi, '<$1$2>').replace(/&lt;[^>]*>/g, '').replace(/\{\\[^}]*\}/g, '').replace(/\r?\n/g, '<br>').trim();
+  }
+  function paintSub(text) {
+    if (text === subLast) return;
+    subLast = text;
+    const el = $('#lpSub'), h = subHtml(text);
+    el.innerHTML = h ? `<span>${h}</span>` : '';
+    el.classList.toggle('on', !!h);
+  }
+
   /* ---------- «Следующая серия» ---------- */
   function paintNext(nx) {
     const box = $('#lpNext');
@@ -165,7 +182,8 @@ const PL = (() => {
   function paintPop() {
     const d = POP[pop], st = S && S[d.key]; if (!st) { closePop(); return; }
     const html = `<h4>${d.title}</h4>` + st.ls.map((v, i) => `<button class="lp-opt ${v === st.v ? 'on' : ''}" data-i="${i}"><span>${esc(d.label(v))}</span>${IC.check}</button>`).join('');
-    const box = $('#lpPop'); if (cache.pop !== html) { box.innerHTML = html; cache.pop = html; }
+    const extra = pop === 'cc' ? `<h4>Размер</h4><div class="lp-sizes">${SUB_SIZES.map(([k, l]) => `<button class="lp-sz ${k === subSize ? 'on' : ''}" data-sz="${k}">${l}</button>`).join('')}</div>` : '';
+    const box = $('#lpPop'); if (cache.pop !== html + extra) { box.innerHTML = html + extra; cache.pop = html + extra; }
   }
   function openPop(k) {
     if (!S || !S[POP[k].key]) return;
@@ -177,6 +195,8 @@ const PL = (() => {
   }
   function closePop() { pop = null; $('#lpPop').classList.add('hidden'); root().classList.remove('pop-open'); $$('.lp-chip', row).forEach((b) => b.classList.remove('open')); poke(); }
   $('#lpPop').addEventListener('click', (e) => {
+    const z = e.target.closest('.lp-sz');
+    if (z) { subSize = z.dataset.sz; lsSet('pl.subsize', subSize); applySubSize(); paintPop(); return; }
     const o = e.target.closest('.lp-opt'); if (!o || !pop || !S) return;
     const d = POP[pop], st = S[d.key], v = st.ls[+o.dataset.i];
     send('set', { k: SET_KEY[pop], v });
@@ -260,10 +280,10 @@ const PL = (() => {
     if (used) { e.preventDefault(); poke(); document.activeElement && document.activeElement.blur && document.activeElement !== $('#lpVol') && document.activeElement.blur(); }
   });
 
-  build();
+  build(); applySubSize();
   return {
     /** Запуск новой серии или фильма: сбрасываем состояние и показываем панели. */
-    open(resume) { S = null; volApplied = false; started = false; resumeAt = resume > 0 ? resume : 0; cache = {}; nextCancelled = false; nextTotal = 0; closePop(); paintNext(null); const p = root(); p.classList.remove('ad', 'noui'); $('#lpWait').classList.remove('on'); $('.lp-prog').style.width = '0'; $('.lp-buf').style.width = '0'; $('#lpT').textContent = '0:00'; $('#lpD').textContent = '0:00'; poke(); },
+    open(resume) { subLast = null; paintSub(''); S = null; volApplied = false; started = false; resumeAt = resume > 0 ? resume : 0; cache = {}; nextCancelled = false; nextTotal = 0; closePop(); paintNext(null); const p = root(); p.classList.remove('ad', 'noui'); $('#lpWait').classList.remove('on'); $('.lp-prog').style.width = '0'; $('.lp-buf').style.width = '0'; $('#lpT').textContent = '0:00'; $('#lpD').textContent = '0:00'; poke(); },
     close() { clearTimeout(idleT); closePop(); S = null; document.body.classList.remove('lp-has-next'); },
     setAd(on) { root().classList.toggle('ad', !!on); if (on) $('#lpWait').classList.remove('on'); },
     /** Последнее известное время и длительность (обновляется 4 раза в секунду). */
@@ -271,7 +291,7 @@ const PL = (() => {
     popOpen: () => !!pop,
     closePop,
     poke,
-    onMessage(e) { if (e.data && e.data.luma && e.data.st && e.source === frame().contentWindow) onState(e.data.st); },
+    onMessage(e) { const m = e.data; if (!m || !m.luma || e.source !== frame().contentWindow) return; if (m.st) onState(m.st); else if (m.sub !== undefined && S && !(S.cc && S.cc.v === 'Откл')) paintSub(m.sub); },
     setFs(on) { const b = $('#plFs'); if (b) b.innerHTML = on ? IC.fsOff : IC.fs; }
   };
 })();
