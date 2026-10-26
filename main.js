@@ -289,6 +289,12 @@ app.whenReady().then(() => {
     { urls: ['https://*.liftw.ws/*'] },
     (d, cb) => { d.requestHeaders['Referer'] = 'https://liftw.ws/'; d.requestHeaders['Origin'] = 'https://liftw.ws'; cb({ requestHeaders: d.requestHeaders }); }
   );
+  // Лишние запросы плеера сайта: пиксели статистики (s.namy.ws) и загрузчик рекламных XML (vuegenesisvue.com /load-xml/). Из-за них в плеере бывают зависания и голос рекламы без картинки.
+  // Сам поток (embed.liftw.ws, js.fprxnet.ws, *.interkh.com) не трогаем.
+  session.defaultSession.webRequest.onBeforeRequest(
+    { urls: ['*://s.namy.ws/*', '*://vuegenesisvue.com/*', '*://*.vuegenesisvue.com/*'] },
+    (d, cb) => { if (process.env.LUMA_DEBUG_BLOCK) console.log('[blocked]', d.url.slice(0, 100)); cb({ cancel: true }); }
+  );
   // YouTube-встраивание требует Referer
   session.defaultSession.webRequest.onBeforeSendHeaders(
     { urls: ['https://www.youtube-nocookie.com/*', 'https://www.youtube.com/embed/*'] },
