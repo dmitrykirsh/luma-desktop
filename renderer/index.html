@@ -8,6 +8,7 @@
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
 <link rel="stylesheet" href="fonts.css">
 <link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="player.css">
 <link rel="stylesheet" href="tv.css">
 <link rel="stylesheet" href="rates.css">
 <link rel="stylesheet" href="update.css">
@@ -49,22 +50,33 @@
 </div>
 
 <div id="player" class="hidden">
-  <div class="pl-bar">
-    <button class="pl-btn" id="plClose" title="Закрыть (Esc)"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
+  <header class="lp-top" id="lpTop">
+    <button class="lp-ib" id="plClose" title="Закрыть (Esc)"><svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg></button>
     <div class="pl-title"><b id="plTitle"></b><span id="plSub"></span></div>
     <div class="pl-eps" id="plEps"></div>
-    <button class="pl-btn" id="plFs" title="Полный экран (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
+    <div class="lp-drag"></div>
     <div class="pl-win">
       <button class="win-btn" data-win="min" title="Свернуть"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
       <button class="win-btn" data-win="max" title="Развернуть"><svg viewBox="0 0 10 10" class="max-icon"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
       <button class="win-btn close" data-win="close" title="Закрыть Luma"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></button>
     </div>
+  </header>
+  <div class="lp-stage" id="lpStage">
+    <iframe id="plFrame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
+    <div class="lp-click" id="lpClick"></div>
+    <div class="lp-shade"></div>
+    <div class="lp-fb" id="lpFb"></div>
+    <div class="lp-wait" id="lpWait"></div>
+    <div class="lp-next hidden" id="lpNext"></div>
+    <div class="lp-dock" id="lpDock">
+      <div class="lp-seek" id="lpSeek"><div class="lp-rail"><i class="lp-buf"></i><i class="lp-prog"></i></div><b class="lp-knob"></b><span class="lp-tip">0:00</span></div>
+      <div class="lp-row" id="lpRow"></div>
+    </div>
+    <div class="lp-pop hidden" id="lpPop"></div>
+    <div class="pl-pk-back hidden" id="plPkBack"></div>
+    <div class="pl-picker hidden" id="plPicker"></div>
+    <div class="pl-loader"><div class="pl-logo" id="plLogo"></div></div>
   </div>
-  <div class="pl-hot" id="plHot"></div>
-  <div class="pl-pk-back hidden" id="plPkBack"></div>
-  <div class="pl-picker hidden" id="plPicker"></div>
-  <iframe id="plFrame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
-  <div class="pl-loader"><div class="pl-logo" id="plLogo"></div></div>
 </div>
 
 <div id="trailerModal" class="hidden">
@@ -83,6 +95,7 @@
 <script src="vendor/hls.min.js"></script>
 <script src="holidays.js"></script>
 <script src="app.js"></script>
+<script src="plui.js"></script>
 <script src="tv.js"></script>
 <script src="update.js"></script>
 </body>

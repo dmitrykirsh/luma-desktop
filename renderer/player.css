@@ -1,0 +1,147 @@
+/* ===== Плеер Luma: собственные элементы управления поверх видео ===== */
+#player{position:fixed;inset:0;z-index:80;background:#000;display:flex;flex-direction:column;overflow:hidden}
+#player:not(.hidden){animation:plIn .5s var(--ease) both}
+@keyframes plIn{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
+#player.idle{cursor:none}
+#player.idle.pop-open,#player.idle.pk-open{cursor:auto}
+
+/* --- верхняя панель: в окне — обычный заголовок (окно можно тянуть), в полном экране — плавающая --- */
+.lp-top{position:relative;z-index:6;flex:none;height:54px;display:flex;align-items:center;gap:12px;padding:0 0 0 14px;background:linear-gradient(180deg,rgba(28,30,37,.98),rgba(17,18,23,.98));border-bottom:1px solid var(--line);-webkit-app-region:drag}
+.lp-top>*{-webkit-app-region:no-drag}
+.lp-top .lp-drag{flex:1;align-self:stretch;-webkit-app-region:drag}
+.pl-win{display:flex;align-self:stretch}
+.pl-win .win-btn{width:48px;height:100%}
+.lp-ib{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;background:var(--surface-2);border:1px solid var(--line);transition:background .2s,transform .3s var(--ease),border-color .2s;flex:none}
+.lp-ib svg{width:17px;height:17px}
+.lp-ib:hover{background:var(--primary);border-color:transparent;transform:scale(1.08)}
+.lp-ib:active{transform:scale(.94)}
+.pl-title{max-width:300px;line-height:1.25;flex:0 1 auto;min-width:0}
+.pl-title b{font:600 15px var(--font-body);color:var(--text);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pl-title span{color:var(--muted);font-size:12px}
+.pl-eps{display:flex;align-items:center;gap:2px;padding:3px;margin-left:8px;border-radius:15px;background:rgba(248,249,250,.06);border:1px solid var(--line)}
+.pl-eps:empty{display:none}
+.eb{height:32px;border-radius:12px;color:var(--text);display:flex;align-items:center;justify-content:center;gap:8px;font:600 13px var(--font-body);transition:background .2s,transform .25s var(--ease),opacity .2s}
+.eb svg{width:17px;height:17px;flex:none}
+.eb-ico{width:34px}
+.eb-pick{padding:0 12px 0 14px}
+.eb-pick svg{width:15px;height:15px;transition:transform .35s var(--ease)}
+.eb-pick.open svg{transform:rotate(180deg)}
+.eb:hover:not(:disabled){background:var(--primary)}
+.eb-pick.open{background:rgba(255,51,102,.18)}
+.eb:active:not(:disabled){transform:scale(.95)}
+.eb:disabled{opacity:.28;cursor:default}
+
+body.fs .lp-top{position:absolute;left:0;right:0;top:0;border:0;background:linear-gradient(180deg,rgba(11,12,16,.9),rgba(11,12,16,0));-webkit-app-region:no-drag;transition:opacity .35s,transform .45s var(--ease)}
+body.fs .lp-top .lp-drag{-webkit-app-region:no-drag}
+body.fs .pl-win{display:none}
+body.fs #player.idle .lp-top{opacity:0;transform:translateY(-100%);pointer-events:none}
+
+/* --- сцена с видео --- */
+.lp-stage{position:relative;flex:1;min-height:0;background:#000}
+#plFrame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
+.lp-click{position:absolute;inset:0;z-index:1}
+#player.ad .lp-click,#player.noui .lp-click{pointer-events:none}
+.lp-shade{position:absolute;inset:0;z-index:2;pointer-events:none;opacity:1;transition:opacity .4s;background:linear-gradient(0deg,rgba(8,9,12,.9) 0,rgba(8,9,12,.45) 130px,transparent 260px)}
+#player.idle .lp-shade,#player.ad .lp-shade,#player.noui .lp-shade{opacity:0}
+
+/* --- нижняя панель --- */
+.lp-dock{position:absolute;left:0;right:0;bottom:0;z-index:4;padding:0 26px 18px;transition:opacity .4s,transform .5s var(--ease)}
+#player.idle .lp-dock{opacity:0;transform:translateY(24px);pointer-events:none}
+#player.ad .lp-dock,#player.noui .lp-dock{opacity:0;pointer-events:none}
+.lp-seek{position:relative;height:26px;display:flex;align-items:center;cursor:pointer;touch-action:none}
+.lp-rail{position:relative;width:100%;height:4px;border-radius:3px;background:rgba(248,249,250,.2);transition:height .2s var(--ease)}
+.lp-seek:hover .lp-rail,.lp-seek.drag .lp-rail{height:7px}
+.lp-rail i{position:absolute;left:0;top:0;bottom:0;border-radius:inherit;width:0}
+.lp-buf{background:rgba(248,249,250,.28)}
+.lp-prog{background:linear-gradient(90deg,var(--primary),var(--accent));box-shadow:0 0 14px rgba(255,120,60,.45)}
+.lp-knob{position:absolute;left:0;top:50%;width:15px;height:15px;margin:-7.5px 0 0 -7.5px;border-radius:50%;background:#fff;box-shadow:0 2px 10px rgba(0,0,0,.5),0 0 0 4px rgba(255,184,0,.3);transform:scale(0);transition:transform .22s var(--ease);pointer-events:none}
+.lp-seek:hover .lp-knob,.lp-seek.drag .lp-knob{transform:scale(1)}
+.lp-tip{position:absolute;bottom:24px;display:flex;flex-direction:column;align-items:center;gap:6px;left:0;transform:translateX(-50%);padding:5px 10px;border-radius:9px;background:rgba(24,26,32,.96);border:1px solid var(--line);font:600 12.5px var(--font-body);font-variant-numeric:tabular-nums;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .15s}
+.lp-seek:hover .lp-tip,.lp-seek.drag .lp-tip{opacity:1}
+.lp-row{display:flex;align-items:center;gap:6px;height:48px}
+.lp-row .grow{flex:1}
+.lp-b{width:42px;height:42px;border-radius:50%;display:grid;place-items:center;color:var(--text);transition:background .2s,transform .3s var(--ease);flex:none}
+.lp-b svg{width:22px;height:22px}
+.lp-b.fill svg{fill:currentColor;stroke:none}
+.lp-b:hover{background:rgba(248,249,250,.14);transform:scale(1.08)}
+.lp-b:active{transform:scale(.92)}
+.lp-b.main{width:46px;height:46px;background:var(--primary);box-shadow:0 8px 24px rgba(255,51,102,.4)}
+.lp-b.main:hover{background:#ff4f7e}
+.lp-b.main svg{width:22px;height:22px}
+.lp-b.skip{position:relative}
+.lp-b.skip small{position:absolute;font:700 8.5px var(--font-body);top:50%;left:50%;transform:translate(-50%,-38%);pointer-events:none}
+.lp-vol{display:flex;align-items:center;border-radius:22px}
+.lp-vol input{width:0;opacity:0;margin:0;transition:width .3s var(--ease),opacity .2s,margin .3s var(--ease)}
+.lp-vol:hover input,.lp-vol:focus-within input{width:84px;opacity:1;margin:0 10px 0 2px}
+.lp-vol input[type=range]{-webkit-appearance:none;appearance:none;height:4px;border-radius:2px;background:linear-gradient(90deg,#fff var(--v,70%),rgba(248,249,250,.25) var(--v,70%));outline:none;cursor:pointer}
+.lp-vol input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:#fff;box-shadow:0 1px 6px rgba(0,0,0,.5)}
+.lp-time{margin-left:8px;font:500 13px var(--font-body);font-variant-numeric:tabular-nums;color:var(--muted);white-space:nowrap}
+.lp-time b{color:var(--text);font-weight:600}
+.lp-time i{font-style:normal;margin:0 5px;opacity:.6}
+.lp-chip{height:34px;padding:0 13px;border-radius:17px;display:flex;align-items:center;gap:7px;font:600 12.5px var(--font-body);color:var(--text);background:rgba(248,249,250,.08);border:1px solid var(--line);transition:background .2s,transform .3s var(--ease),border-color .2s;white-space:nowrap;max-width:200px}
+.lp-chip span{overflow:hidden;text-overflow:ellipsis}
+.lp-chip em{font-style:normal;color:var(--muted);font-weight:500}
+.lp-chip svg{width:15px;height:15px;flex:none}
+.lp-chip:hover,.lp-chip.open{background:rgba(248,249,250,.16)}
+.lp-chip.open{border-color:rgba(255,184,0,.5)}
+.lp-chip:active{transform:scale(.96)}
+.lp-chip.hq{background:rgba(255,184,0,.14);border-color:rgba(255,184,0,.3);color:var(--accent)}
+
+/* --- всплывающие списки (озвучка, качество, субтитры, скорость) --- */
+.lp-pop{position:absolute;right:26px;bottom:88px;z-index:6;width:300px;max-height:min(420px,calc(100% - 140px));overflow-y:auto;padding:8px;border-radius:20px;background:rgba(24,26,32,.96);backdrop-filter:blur(26px) saturate(1.4);border:1px solid rgba(248,249,250,.12);box-shadow:0 30px 90px rgba(0,0,0,.65);transform-origin:bottom right;animation:lpPop .32s var(--ease) both}
+@keyframes lpPop{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
+.lp-pop h4{font:600 12px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--muted);padding:10px 12px 8px}
+.lp-opt{width:100%;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:13px;text-align:left;font:500 14px var(--font-body);color:var(--text);transition:background .15s}
+.lp-opt span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lp-opt svg{width:17px;height:17px;opacity:0;color:var(--primary);flex:none}
+.lp-opt:hover{background:rgba(248,249,250,.09)}
+.lp-opt.on{font-weight:600}
+.lp-opt.on svg{opacity:1}
+
+/* --- отклик по центру: пауза, воспроизведение, перемотка --- */
+.lp-fb{position:absolute;inset:0;z-index:3;pointer-events:none;display:grid;place-items:center}
+.lp-fb i{position:absolute;display:grid;place-items:center;border-radius:50%;background:rgba(24,26,32,.62);backdrop-filter:blur(14px);border:1px solid rgba(248,249,250,.16);opacity:0}
+.lp-fb i svg{width:42%;height:42%;fill:var(--text);stroke:none}
+.lp-fb .c{width:92px;height:92px}
+.lp-fb .l,.lp-fb .r{width:84px;height:84px;top:50%;margin-top:-42px;flex-direction:column;font:600 12px var(--font-body);gap:2px}
+.lp-fb .l{left:16%}.lp-fb .r{right:16%}
+.lp-fb .l svg,.lp-fb .r svg{width:28px;height:28px;fill:none;stroke:var(--text);stroke-width:2}
+.lp-fb i.go{animation:lpFb .7s var(--ease)}
+@keyframes lpFb{0%{opacity:0;transform:scale(.6)}28%{opacity:1;transform:scale(1)}100%{opacity:0;transform:scale(1.35)}}
+.lp-wait{position:absolute;left:50%;top:50%;width:54px;height:54px;margin:-27px 0 0 -27px;z-index:3;pointer-events:none;border-radius:50%;border:3px solid rgba(248,249,250,.18);border-top-color:var(--accent);opacity:0;transition:opacity .25s}
+.lp-wait.on{opacity:1;animation:lpSpin .9s linear infinite}
+@keyframes lpSpin{to{transform:rotate(360deg)}}
+
+/* --- карточка «Следующая серия» --- */
+.lp-next{position:absolute;right:26px;bottom:108px;z-index:5;width:340px;padding:16px 18px;border-radius:20px;background:rgba(24,26,32,.94);backdrop-filter:blur(24px);border:1px solid rgba(248,249,250,.12);box-shadow:0 24px 70px rgba(0,0,0,.6);animation:lpPop .45s var(--ease) both;overflow:hidden}
+#player.idle:not(.has-next) .lp-next{display:none}
+.lp-next small{display:block;font:600 11.5px var(--font-body);letter-spacing:.12em;text-transform:uppercase;color:var(--accent)}
+.lp-next b{display:block;margin:6px 0 4px;font:600 15px/1.3 var(--font-body);overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
+.lp-next p{font:500 13px var(--font-body);color:var(--muted)}
+.lp-next .nb{display:flex;gap:8px;margin-top:12px}
+.lp-next button{flex:1;height:36px;border-radius:12px;font:600 13px var(--font-body);background:rgba(248,249,250,.1);transition:background .2s,transform .25s var(--ease)}
+.lp-next button.go{background:var(--primary)}
+.lp-next button:hover{background:rgba(248,249,250,.2)}
+.lp-next button.go:hover{background:#ff4f7e}
+.lp-next button:active{transform:scale(.96)}
+.lp-next .bar{position:absolute;left:0;bottom:0;height:3px;background:linear-gradient(90deg,var(--primary),var(--accent));transition:width 1s linear}
+
+/* --- выбор серии и загрузка --- */
+.pl-pk-back{top:0}
+.pl-picker{left:200px;top:8px}
+body.fs .pl-picker{top:64px}
+.pl-loader{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;z-index:7;background:#000;transition:opacity .5s}
+.pl-loader.done{opacity:0}
+
+.lp-vol.peek input{width:84px;opacity:1;margin:0 10px 0 2px}
+.lp-prog,.lp-buf{transition:width .26s linear}
+.lp-knob{transition:transform .22s var(--ease),left .26s linear}
+.lp-seek.drag .lp-prog,.lp-seek.drag .lp-knob{transition:none}
+
+.lp-tip:has(.lp-th){padding:5px 5px 8px;border-radius:14px}
+.lp-th{display:block;width:160px;height:90px;border-radius:9px;background:#0b0c10 no-repeat;background-size:1600px 900px}
+
+/* уведомления над видео — в правом верхнем углу, чтобы не закрывать кнопки внизу */
+body.playing #toasts{top:68px;bottom:auto;right:20px}
+body.playing.fs #toasts{top:76px}
+body.fs .lp-top::before{content:'';position:absolute;left:0;right:0;top:0;height:130px;background:linear-gradient(rgba(8,9,12,.85),transparent);z-index:-1;pointer-events:none}

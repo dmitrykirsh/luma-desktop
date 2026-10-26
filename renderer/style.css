@@ -275,22 +275,6 @@ kbd{font:600 11px var(--font-body);padding:2px 7px;border-radius:6px;background:
 .pal-hint{padding:26px;text-align:center;color:var(--muted)}
 
 /* player */
-#player{position:fixed;inset:0;z-index:80;background:#000;animation:fade .3s both}
-#plFrame{position:absolute;inset:0;width:100%;height:100%;border:0;background:#000}
-.pl-bar{position:absolute;left:0;right:0;top:0;z-index:3;height:68px;padding:0 18px;display:flex;align-items:center;gap:14px;background:linear-gradient(rgba(0,0,0,.85),transparent);transition:opacity .4s,transform .4s var(--ease)}
-#player.idle .pl-bar{opacity:0;transform:translateY(-100%);pointer-events:none}
-#player.idle{cursor:none}
-.pl-btn{width:42px;height:42px;border-radius:50%;background:rgba(255,255,255,.12);backdrop-filter:blur(10px);display:grid;place-items:center;transition:.2s;flex:none}
-.pl-btn:hover{background:rgba(255,255,255,.28);transform:scale(1.08)}
-.pl-btn svg{width:20px;height:20px}
-.pl-title b{display:block;font-size:16px}.pl-title span{color:var(--muted);font-size:12.5px}
-.pl-eps{margin-left:auto;display:flex;gap:8px}
-.pl-eps button{height:38px;padding:0 14px;border-radius:19px;background:rgba(255,255,255,.12);font-weight:600;font-size:13px;transition:.2s;backdrop-filter:blur(10px)}
-.pl-eps button:hover:not(:disabled){background:#fff;color:#000}
-.pl-eps button:disabled{opacity:.3;cursor:default}
-.pl-loader{position:absolute;inset:0;display:grid;place-items:center;pointer-events:none;z-index:1;transition:opacity .5s}
-.pl-loader.done{opacity:0}
-#plFs{margin-left:0}
 
 /* trailer modal */
 #trailerModal{position:fixed;inset:0;z-index:85;display:grid;place-items:center}
@@ -311,9 +295,6 @@ kbd{font:600 11px var(--font-body);padding:2px 7px;border-radius:6px;background:
 @media (max-width:1100px){.det-top{flex-direction:column;align-items:flex-start}.hero-poster{display:none}.hero-info{width:80%}}
 @media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;transition-duration:.01ms!important}}
 
-/* зона у верхнего края поверх iframe: наведение возвращает панель (правый угол оставлен плееру) */
-.pl-hot{position:absolute;left:0;top:0;height:64px;width:calc(100% - 150px);z-index:2}
-#player:not(.idle) .pl-hot{display:none}
 
 /* hero с фоном TMDB */
 .hero-slide.has-bd .hero-bgimg{inset:0;filter:none;background-position:center 25%;transform:scale(1.04)}
@@ -361,18 +342,6 @@ kbd{font:600 11px var(--font-body);padding:2px 7px;border-radius:6px;background:
 .key-row input:focus{border-color:var(--primary);box-shadow:0 0 0 3px rgba(255,51,102,.18)}
 .hint{margin-top:12px;color:var(--muted);font-size:13px;line-height:1.5}.hint.bad{color:#ff8a8a}
 
-/* правый верхний угол принадлежит плееру (настройки качества и озвучки) */
-.pl-bar{padding-right:150px;pointer-events:none}
-.pl-bar>*{pointer-events:auto}
-.pl-title{pointer-events:none}
-.pl-eps{margin-left:auto}
-
-/* все наши кнопки слева: правая часть экрана целиком отдана плееру (меню качества, озвучки, «пропустить интро») */
-.pl-bar{padding-right:0;width:min(760px,60vw);background:linear-gradient(90deg,rgba(0,0,0,.85),transparent)}
-.pl-eps{margin-left:6px}
-.pl-title{max-width:260px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
-.pl-hot{width:min(760px,60vw)}
-#plFs{order:5}
 
 /* подборки */
 .page-head .sub{color:var(--muted);margin-top:6px}
@@ -436,8 +405,6 @@ h1,h2,h3,.sec-head h2,.lsec-t,.promo b,.empty h3,.hero-tag{font-family:var(--fon
 .lcard:hover,.tr:hover,.shot:hover{border-color:rgba(255,184,0,.45)}
 .pill:hover{border-color:rgba(255,184,0,.4)}
 .nav:hover svg{color:var(--text)}
-#player{background:var(--surface)}
-.pl-btn,.pl-eps button{background:rgba(24,26,32,.78)}
 .card .bar{background:rgba(248,249,250,.18)}
 
 /* ===== Luma: логотип и заставка ===== */
@@ -465,32 +432,6 @@ body.playing #titlebar{-webkit-app-region:no-drag;pointer-events:none}
 #sidebar:hover .logo{max-width:200px}
 #bkCard .set-head+.key-row{margin-top:18px}
 
-/* ===== Плеер: собственная верхняя панель (окно можно перетаскивать, есть кнопки окна) ===== */
-#player{display:flex;flex-direction:column}
-#player .pl-bar{position:relative;flex:none;height:44px;width:auto;padding:0 0 0 10px;gap:10px;background:var(--surface);border-bottom:1px solid var(--line);-webkit-app-region:drag;pointer-events:auto;opacity:1!important;transform:none!important}
-#player .pl-bar>*{-webkit-app-region:no-drag}
-#player .pl-title{-webkit-app-region:drag;pointer-events:auto;flex:0 1 auto;max-width:340px}
-#player .pl-btn{width:32px;height:32px}
-#player .pl-btn svg{width:17px;height:17px}
-#player .pl-eps{margin-left:0}
-#player .pl-eps button{height:30px;padding:0 12px;font-size:12.5px}
-#player .pl-win{margin-left:auto;display:flex;height:100%;align-self:stretch}
-#player .pl-win .win-btn{height:100%}
-#player .pl-hot{display:none}
-#plFrame{position:relative;inset:auto;flex:1;width:100%;height:auto;min-height:0}
-#player .pl-loader{top:44px}
-#player.idle{cursor:auto}
-/* полный экран: панель поверх видео, прячется сама, кнопок окна нет */
-body.fs #player .pl-bar{position:absolute;left:0;top:0;width:min(760px,60vw);border:0;background:linear-gradient(90deg,rgba(11,12,16,.92),transparent);-webkit-app-region:no-drag;z-index:3;transition:opacity .4s,transform .4s var(--ease);pointer-events:none}
-body.fs #player .pl-bar>*{pointer-events:auto}
-body.fs #player.idle .pl-bar{opacity:0!important;transform:translateY(-100%)!important;pointer-events:none}
-body.fs #player.idle .pl-bar>*{pointer-events:none}
-body.fs #player.idle{cursor:none}
-body.fs #plFrame{position:absolute;inset:0;height:100%}
-body.fs #player .pl-loader{top:0}
-body.fs #player .pl-win{display:none}
-body.fs #player.idle .pl-hot{display:block;width:min(760px,60vw)}
-#player #plFs{order:0}
 
 /* полоска «досмотрено» на кнопке серии */
 .ep{overflow:hidden}
@@ -512,30 +453,6 @@ body.fs #player.idle .pl-hot{display:block;width:min(760px,60vw)}
 .pr img.round{border-radius:50%;width:46px;height:46px;object-fit:cover}
 @media (max-width:1100px){.phead{flex-direction:column;align-items:flex-start}}
 
-/* ===== Плеер: верхняя панель в стиле Luma ===== */
-#player:not(.hidden){animation:plIn .5s var(--ease) both}
-@keyframes plIn{from{opacity:0;transform:scale(.985)}to{opacity:1;transform:none}}
-#player .pl-bar{height:54px;padding:0 0 0 14px;gap:14px;background:linear-gradient(180deg,rgba(28,30,37,.98),rgba(17,18,23,.98));border-bottom:1px solid var(--line);animation:barIn .6s var(--ease) both}
-@keyframes barIn{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
-#player .pl-btn{width:36px;height:36px;background:var(--surface-2);border:1px solid var(--line);backdrop-filter:none;transition:background .2s,transform .3s var(--ease),border-color .2s}
-#player .pl-btn:hover{background:var(--primary);border-color:transparent;transform:scale(1.08)}
-#player .pl-btn:active{transform:scale(.94)}
-#player .pl-title{max-width:300px;line-height:1.25}
-#player .pl-title b{font:600 15px var(--font-body);color:var(--text);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-#player .pl-title span{color:var(--muted);font-size:12px}
-#player .pl-eps{display:flex;align-items:center;gap:2px;padding:3px;margin-left:8px;border-radius:15px;background:rgba(248,249,250,.06);border:1px solid var(--line)}
-#player .pl-eps:empty{display:none}
-.eb{height:32px;border-radius:12px;color:var(--text);display:flex;align-items:center;justify-content:center;gap:8px;font:600 13px var(--font-body);transition:background .2s,transform .25s var(--ease),opacity .2s}
-.eb svg{width:17px;height:17px;flex:none}
-.eb-ico{width:34px}
-.eb-pick{padding:0 12px 0 14px}
-.eb-pick svg{width:15px;height:15px;transition:transform .35s var(--ease)}
-.eb-pick.open svg{transform:rotate(180deg)}
-.eb:hover:not(:disabled){background:var(--primary)}
-.eb-pick.open{background:rgba(255,51,102,.18);color:var(--text)}
-.eb:active:not(:disabled){transform:scale(.95)}
-.eb:disabled{opacity:.28;cursor:default}
-#player .pl-win .win-btn{width:48px}
 /* окно выбора серии */
 .pl-pk-back{position:absolute;left:0;right:0;top:54px;bottom:0;z-index:4;background:rgba(11,12,16,.45);backdrop-filter:blur(3px);animation:fade .25s both}
 .pl-picker{position:absolute;left:210px;top:62px;z-index:5;width:min(460px,calc(100vw - 260px));max-height:min(520px,calc(100vh - 90px));display:flex;flex-direction:column;border-radius:22px;background:rgba(24,26,32,.96);backdrop-filter:blur(26px) saturate(1.4);border:1px solid rgba(248,249,250,.12);box-shadow:0 36px 100px rgba(0,0,0,.7);transform-origin:20% 0;animation:pkIn .4s var(--ease) both;overflow:hidden}
@@ -558,7 +475,6 @@ body.fs #player.idle .pl-hot{display:block;width:min(760px,60vw)}
 /* загрузка плеера: логотип вместо спиннера */
 .pl-loader .spin{display:none}
 .pl-logo svg.luma-logo{animation:pulse 1.5s ease-in-out infinite;filter:drop-shadow(0 0 24px rgba(255,51,102,.5))}
-#player .pl-loader{top:54px}
 
 
 /* ===== заставка с анимацией и звуком; только transform/opacity, поэтому нагрузка на видеокарту минимальная ===== */
@@ -676,3 +592,9 @@ body.is-hidden #aurora i{animation-play-state:paused}
 .lcard .lposters{display:flex;gap:7px;margin-top:14px}
 .lcard .lposters img{flex:1;min-width:0;aspect-ratio:2/3;object-fit:cover;border-radius:8px;box-shadow:0 6px 16px rgba(0,0,0,.45);animation:fadeIn .5s var(--ease) both}
 @keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* серия досмотрена до конца: приглушена и с галочкой; «открывали» — только приглушена */
+.ep.done,.pk-e.done{color:var(--muted)}
+.ep.done::after,.pk-e.done::after{content:'';position:absolute;right:7px;top:7px;width:13px;height:13px;border-radius:50%;background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%230B0C10' stroke-width='3.600' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.500l4.500 4.500L19 7.500'/%3E%3C/svg%3E") center/9px no-repeat}
+.ep.done.cur{color:#000}
+.ep.cur,.ep.seen.cur,.ep.done.cur{color:#0B0C10}

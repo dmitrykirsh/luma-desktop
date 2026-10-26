@@ -39,7 +39,7 @@ const SECTIONS = {
 };
 
 /* ================= состояние ================= */
-const state = { favs: [], history: [], seen: {}, lists: [], lbRecent: [], progress: {}, tvFav: [], tvStats: {}, tvPrefs: { scope: 'stable', vol: 1, muted: false }, tvLast: '', updSkip: '' };
+const state = { favs: [], history: [], seen: {}, lists: [], lbRecent: [], progress: {}, done: {}, tvFav: [], tvStats: {}, tvPrefs: { scope: 'stable', vol: 1, muted: false }, tvLast: '', updSkip: '' };
 let store = {};
 async function initStore() {
   store = (await window.lift.getStore()) || {};
@@ -49,6 +49,8 @@ async function initStore() {
   state.lists = store.lists || [];
   state.lbRecent = store.lbRecent || [];
   state.progress = store.progress || {};
+  state.done = store.done || {};
+  migrateDone();
   state.tvFav = store.tvFav || [];
   state.tvStats = store.tvStats || {};
   state.tvPrefs = Object.assign({ scope: 'stable', vol: 1, muted: false }, store.tvPrefs || {});
@@ -57,6 +59,23 @@ async function initStore() {
   for (const k of Object.keys(state.tvStats)) if (!state.tvStats[k].last) delete state.tvStats[k];   // пустые записи статистики не храним
 }
 const persist = (k) => window.lift.setStore(k, state[k]);
+/* «досмотрено»: серии, которые просмотрены до конца (в отличие от просто открытых); хранится по ключу «фильм:сезон» */
+const isDone = (id, season, episode) => (state.done[id + ':' + season] || []).includes(String(episode));
+function markDone(id, season, episode) {
+  const k = id + ':' + season, a = (state.done[k] = state.done[k] || []);
+  if (!a.includes(String(episode))) { a.push(String(episode)); persist('done'); }
+}
+// один раз: раньше серия, которую плеер переключал сам, не засчитывалась. Если сейчас смотрим серию N, то открытые ранее серии до N считаем досмотренными, а их застрявшие полоски убираем
+function migrateDone() {
+  if (store.doneMigrated) return;
+  const latest = {};
+  for (const h of state.history) if (h.season && !latest[h.id]) latest[h.id] = h;
+  for (const h of Object.values(latest)) {
+    const seen = state.seen[h.id + ':' + h.season] || [];
+    for (const e of seen) if (+e < +h.episode) { markDone(h.id, h.season, e); delete state.progress[progKey(h.id, h.season, e)]; }
+  }
+  persist('progress'); window.lift.setStore('doneMigrated', true); store.doneMigrated = true;
+}
 const brief = (it) => ({ id: it.id, type: it.type, name: it.name, origin_name: it.origin_name, poster: it.poster, year: it.year, kp: it.kp_rating, imdb: it.imdb_rating, quality: it.quality });
 const isFav = (id) => state.favs.some((f) => f.id === id);
 function toggleFav(it) {
@@ -615,7 +634,7 @@ async function renderDetails(view, route, alive) {
       const seasonObj = seasons.find((s) => s.season == curSeason) || seasons[0];
       const seen = state.seen[d.id + ':' + seasonObj.season] || [];
       body.innerHTML = `<div><div class="seasons">${seasons.map((s) => `<button class="pill ${s.season == seasonObj.season ? 'on' : ''}" data-s="${s.season}">Сезон ${s.season}</button>`).join('')}</div>
-        <div class="eps">${seasonObj.episodes.map((e) => `<button class="ep ${seen.includes(String(e)) ? 'seen' : ''} ${last && last.season == seasonObj.season && last.episode == e ? 'cur' : ''}" data-e="${e}" style="animation:viewIn .5s var(--ease) both;animation-delay:${Math.min(+e, 30) * 14}ms">${e}${progressPct(d.id, seasonObj.season, e) ? `<i class="epbar" style="width:${progressPct(d.id, seasonObj.season, e)}%"></i>` : ''}</button>`).join('')}</div></div>`;
+        <div class="eps">${seasonObj.episodes.map((e) => `<button class="ep ${seen.includes(String(e)) ? 'seen' : ''} ${isDone(d.id, seasonObj.season, e) ? 'done' : ''} ${last && last.season == seasonObj.season && last.episode == e ? 'cur' : ''}" data-e="${e}" style="animation:viewIn .5s var(--ease) both;animation-delay:${Math.min(+e, 30) * 14}ms">${e}${!isDone(d.id, seasonObj.season, e) && progressPct(d.id, seasonObj.season, e) ? `<i class="epbar" style="width:${progressPct(d.id, seasonObj.season, e)}%"></i>` : ''}</button>`).join('')}</div></div>`;
       $$('.seasons .pill', body).forEach((b) => b.onclick = () => { curSeason = b.dataset.s; panels.eps(); });
       $$('.ep', body).forEach((b) => b.onclick = () => playItem(d, seasons, seasonObj.season, b.dataset.e));
     },
@@ -721,7 +740,7 @@ const progressPct = (id, season, episode) => { const p = resumeInfo(id, season, 
 let progSaveAt = 0, adActive = false, progTimer = null;
 function storeProgress(key, t, d) {
   if (!key || !isFinite(t) || !isFinite(d) || d < 120) return;
-  if (t > d - 45) delete state.progress[key];                       // досмотрели
+  if (t > d - 45) { delete state.progress[key]; const m = /^(\d+):([^:]+):([^:]+)$/.exec(key); if (m) markDone(m[1], m[2], m[3]); }   // досмотрели
   else if (t >= 5) state.progress[key] = { t: Math.floor(t), d: Math.floor(d), ts: Date.now() };
   else return;
   const keys = Object.keys(state.progress);
@@ -732,6 +751,8 @@ function storeProgress(key, t, d) {
 async function captureProgress() {
   if (!playing || adActive) return;
   const key = playing.key;
+  const own = PL.time();   // состояние плеера приходит от моста 4 раза в секунду
+  if (own) { storeProgress(key, own.t, own.d); return; }
   try { const r = await window.lift.playerTime(); if (r && playing && playing.key === key) storeProgress(key, r.t, r.d); } catch {}
 }
 // плеер сам тоже присылает viewProgress — используем как запасной источник
@@ -740,14 +761,29 @@ window.addEventListener('message', (e) => {
   if (!playing || !fr || e.source !== fr.contentWindow || !e.data || typeof e.data !== 'object') return;
   const m = e.data;
   if (m.event === 'playerReady') $('.pl-loader').classList.add('done');
-  else if (m.event === 'adStart') adActive = true;
-  else if (m.event === 'adStop') adActive = false;
+  else if (m.event === 'adStart') { adActive = true; PL.setAd(true); }
+  else if (m.event === 'adStop') { adActive = false; PL.setAd(false); }
+  else if (m.event === 'changeEpisode') onEpisodeChanged(m);
   else if (m.event === 'viewProgress' && !adActive && Date.now() - progSaveAt > 4000) storeProgress(playing.key, Number(m.time), Number(m.duration));
   else if (m.event === 'ended') storeProgress(playing.key, Number(m.duration) || 1e9, Number(m.duration) || 1e9);
 });
 
 /* ================= плеер ================= */
 let playing = null;
+// плеер сам переключил серию (автопереход или кнопка внутри него): догоняем верхнюю панель, историю и прогресс
+function onEpisodeChanged(m) {
+  if (!playing || !playing.season) return;
+  const season = String(m.season), episode = String(m.episode);
+  if (String(playing.season) === season && String(playing.episode) === episode) return;
+  storeProgress(playing.key, 1e9, 1e9);   // прежняя серия досмотрена
+  const s = playing.seasons.find((x) => String(x.season) === season);
+  if (!s) return;
+  const ep = s.episodes.find((e) => String(e) === episode) ?? episode;
+  playing = { ...playing, season: s.season, episode: ep, key: progKey(playing.d.id, s.season, ep) };
+  adActive = false; progSaveAt = Date.now();
+  addHistory(playing.d, playing.season, playing.episode);
+  renderEpsBar();
+}
 let loaderT = null;
 function playItem(d, seasons, season, episode, opts = {}) {
   const key = progKey(d.id, season, episode);
@@ -770,7 +806,7 @@ function playItem(d, seasons, season, episode, opts = {}) {
   clearTimeout(loaderT); loaderT = setTimeout(hideLoader, 3500);   // на случай, если страница плеера досчитывает счётчики слишком долго
   fr.src = url;
   renderEpsBar();
-  bumpIdle();
+  PL.open(resume ? resume.t : 0);
 }
 const CHEV = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
 const SKIP_PREV = '<svg viewBox="0 0 24 24"><path d="M6 5v14M19 5.500v13L9 12z"/></svg>';
@@ -812,8 +848,8 @@ function paintPicker() {
   $('#plPicker').innerHTML = `<div class="pk-head"><b>Выбор серии</b><span>${esc(d.name)}</span></div>
     <div class="pk-seasons">${seasons.map((s) => `<button class="pk-s ${s.season == cur.season ? 'on' : ''}" data-s="${s.season}">Сезон ${s.season}<small>${s.episodes.length}</small></button>`).join('')}</div>
     <div class="pk-eps">${cur.episodes.map((e, i) => {
-      const isCur = cur.season == season && e == episode, pct = progressPct(d.id, cur.season, e), watched = seen.includes(String(e));
-      return `<button class="pk-e ${isCur ? 'cur' : ''} ${watched && !isCur ? 'seen' : ''}" data-e="${e}" style="--i:${Math.min(i, 24)}" title="${watched ? 'Просмотрено' : ''}">${e}${pct ? `<i style="width:${pct}%"></i>` : ''}</button>`;
+      const isCur = cur.season == season && e == episode, fin = isDone(d.id, cur.season, e), pct = fin ? 0 : progressPct(d.id, cur.season, e), watched = seen.includes(String(e)) || fin;
+      return `<button class="pk-e ${isCur ? 'cur' : ''} ${watched && !isCur ? 'seen' : ''} ${fin && !isCur ? 'done' : ''}" data-e="${e}" style="--i:${Math.min(i, 24)}" title="${fin ? 'Досмотрено' : watched ? 'Открывали' : ''}">${e}${pct ? `<i style="width:${pct}%"></i>` : ''}</button>`;
     }).join('')}</div>`;
   $('.pk-seasons .on', $('#plPicker'))?.scrollIntoView({ block: 'nearest', inline: 'center' });
   $('.pk-e.cur', $('#plPicker'))?.scrollIntoView({ block: 'nearest' });
@@ -836,18 +872,13 @@ async function closePlayer() {
   clearInterval(progTimer);
   $('#player').classList.add('hidden'); window.lift.win('fs-off');   // окно закрываем сразу, а время считываем из ещё живого видео
   await captureProgress();
+  PL.close();
   $('#plFrame').src = 'about:blank'; playing = null;
   if (currentRoute?.name === 'home' || currentRoute?.name === 'details') render(currentRoute);   // обновим «Остановились на самом интересном» и кнопку «Продолжить»
 }
-let idleT;
-function bumpIdle() { const p = $('#player'); p.classList.remove('idle'); clearTimeout(idleT); idleT = setTimeout(() => p.classList.add('idle'), 3500); }
-$('#player').addEventListener('mousemove', bumpIdle);
-$('#plHot').addEventListener('mousemove', bumpIdle);
-$('.pl-bar').addEventListener('mousemove', bumpIdle);
 let lastEscClose = 0;
-window.lift.onEsc(() => { if (pickerOpen()) { lastEscClose = Date.now(); closePicker(); return; } if (!$('#player').classList.contains('hidden')) { lastEscClose = Date.now(); closePlayer(); } });
+window.lift.onEsc(() => { if (PL.popOpen()) { lastEscClose = Date.now(); PL.closePop(); return; } if (pickerOpen()) { lastEscClose = Date.now(); closePicker(); return; } if (!$('#player').classList.contains('hidden')) { lastEscClose = Date.now(); closePlayer(); } });
 $('#plClose').onclick = closePlayer;
-$('#plFs').onclick = () => window.lift.win('fs');
 
 /* ================= лайтбокс ================= */
 let lb = { list: [], i: 0 };
@@ -1477,6 +1508,7 @@ document.addEventListener('keydown', (e) => {
     else if (!$('#lightbox').classList.contains('hidden')) closeLightbox();
     else if (!$('#palette').classList.contains('hidden')) closePalette();
     else if (!$('#trailerModal').classList.contains('hidden')) closeTrailer();
+    else if (PL.popOpen()) PL.closePop();
     else if (pickerOpen()) closePicker();
     else if (!$('#player').classList.contains('hidden')) closePlayer();
     else back();
@@ -1497,7 +1529,7 @@ window.lift.onListAdded((l) => {
 });
 window.lift.onWinState((s) => {
   if (s.max !== undefined) $('.max-icon').forEach((i) => { i.innerHTML = s.max ? '<path d="M2.500 .5h7v7M.5 2.500h7v7h-7z"/>' : '<rect x=".5" y=".5" width="9" height="9"/>'; });
-  if (s.fs !== undefined) document.body.classList.toggle('fs', s.fs);
+  if (s.fs !== undefined) { document.body.classList.toggle('fs', s.fs); PL.setFs(s.fs); }
 });
 
 /* ================= оформление: заставка и фон ================= */
