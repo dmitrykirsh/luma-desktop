@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: tmdbimg:; style-src 'self' 'unsafe-inline'; frame-src https:; script-src 'self'; connect-src 'self' lumatv:; media-src 'self' blob: lumatv: https:; worker-src 'self' blob:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: tmdbimg:; style-src 'self' 'unsafe-inline'; frame-src https:; script-src 'self'; connect-src 'self' lumatv: http://127.0.0.1:8090 http://127.0.0.1:8931; media-src 'self' blob: lumatv: https: http://127.0.0.1:8090 http://127.0.0.1:8931; worker-src 'self' blob:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Luma</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -97,6 +97,8 @@
 <script src="holidays.js"></script>
 <script src="app.js"></script>
 <script src="plui.js"></script>
+<script src="torrplay.js"></script>
+<script src="torrents.js"></script>
 <script src="tv.js"></script>
 <script src="update.js"></script>
 </body>

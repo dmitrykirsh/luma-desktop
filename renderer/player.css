@@ -6,7 +6,7 @@
 #player.idle.pop-open,#player.idle.pk-open{cursor:auto}
 
 /* --- верхняя панель: в окне — обычный заголовок (окно можно тянуть), в полном экране — плавающая --- */
-.lp-top{position:relative;z-index:6;flex:none;height:54px;display:flex;align-items:center;gap:12px;padding:0 0 0 14px;background:linear-gradient(180deg,rgba(28,30,37,.98),rgba(17,18,23,.98));border-bottom:1px solid var(--line);-webkit-app-region:drag}
+.lp-top{position:relative;z-index:6;flex:none;height:64px;display:flex;align-items:center;gap:12px;padding:0 0 0 14px;background:linear-gradient(180deg,rgba(28,30,37,.98),rgba(17,18,23,.98));border-bottom:1px solid var(--line);-webkit-app-region:drag}
 .lp-top>*{-webkit-app-region:no-drag}
 .lp-top .lp-drag{flex:1;align-self:stretch;-webkit-app-region:drag}
 .pl-win{display:flex;align-self:stretch}
@@ -15,9 +15,9 @@
 .lp-ib svg{width:17px;height:17px}
 .lp-ib:hover{background:var(--primary);border-color:transparent;transform:scale(1.08)}
 .lp-ib:active{transform:scale(.94)}
-.pl-title{max-width:300px;line-height:1.25;flex:0 1 auto;min-width:0}
+.pl-title{max-width:380px;line-height:1.3;flex:0 1 auto;min-width:0;padding:8px 0}
 .pl-title b{font:600 15px var(--font-body);color:var(--text);display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.pl-title span{color:var(--muted);font-size:12px}
+.pl-title span{display:block;margin-top:3px;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .pl-eps{display:flex;align-items:center;gap:2px;padding:3px;margin-left:8px;border-radius:15px;background:rgba(248,249,250,.06);border:1px solid var(--line)}
 .pl-eps:empty{display:none}
 .eb{height:32px;border-radius:12px;color:var(--text);display:flex;align-items:center;justify-content:center;gap:8px;font:600 13px var(--font-body);transition:background .2s,transform .25s var(--ease),opacity .2s}
@@ -158,3 +158,6 @@ body.fs .lp-top::before{content:'';position:absolute;left:0;right:0;top:0;height
 .lp-sz{flex:1;height:34px;border-radius:11px;background:rgba(248,249,250,.08);font:600 12.5px var(--font-body);transition:background .2s}
 .lp-sz:hover{background:rgba(248,249,250,.16)}
 .lp-sz.on{background:var(--text);color:#0B0C10}
+
+/* торрент-плеер: поток TorrServe играет <video> вместо iframe-плеера сайта */
+#torrVid{position:absolute;inset:0;width:100%;height:100%;background:#000;object-fit:contain}

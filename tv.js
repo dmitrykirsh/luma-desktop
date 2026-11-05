@@ -10,10 +10,17 @@ const { Readable } = require('stream');
 const { StringDecoder } = require('string_decoder');
 
 const UA_DEFAULT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
-const RAW = 'https://raw.githubusercontent.com/smolnp/IPTVru/gh-pages/';
+// Источники встроенных плейлистов: сначала своё зеркало (снимок с ПК, gist dmitrykirsh),
+// затем оригинал (удалён с GitHub, вдруг вернётся) и зеркала-форки
+const RAWS = [
+  'https://gist.githubusercontent.com/dmitrykirsh/997edd2c85ffed1bf9d12ba7e24f4fca/raw/',
+  'https://raw.githubusercontent.com/smolnp/IPTVru/gh-pages/',
+  'https://raw.githubusercontent.com/AlbertAnimates/IPTVru/gh-pages/',
+  'https://raw.githubusercontent.com/timinside/IPTVru/gh-pages/',
+];
 const BUILTIN = {
-  stable: { name: 'Стабильные', url: RAW + 'IPTVstable.m3u8' },
-  main: { name: 'Основной', url: RAW + 'IPTVru.m3u' }
+  stable: { name: 'Стабильные', src: 'IPTVstable.m3u8' },
+  main: { name: 'Основной', src: 'IPTVru.m3u' }
 };
 const EPG_URL = 'https://iptvx.one/epg/epg_lite.xml.gz';
 // «По странам»: общий каталог iptv-org (проект сообщества, каналы всех стран; ссылки проверяются автоматически)
@@ -67,21 +74,25 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
 
   /* ---------- плейлисты ---------- */
   const cacheFile = (key) => path.join(dir, 'pl-' + crypto.createHash('sha1').update(key).digest('hex').slice(0, 16) + '.m3u');
-  async function fetchPlaylistText(url, force) {
-    const f = cacheFile(url);
+  async function fetchPlaylistText(src, force) {
+    // src: имя встроенного файла (пробуем все зеркала) или полный URL своего списка
+    const urls = /^https?:\/\//i.test(src) ? [src] : RAWS.map((b) => b + src);
+    const f = cacheFile(src);
     try { const st = fs.statSync(f); if (!force && Date.now() - st.mtimeMs < PL_TTL) return fs.readFileSync(f, 'utf8'); } catch {}
-    try {
-      const r = await net.fetch(url, { headers: { 'User-Agent': UA_DEFAULT }, signal: AbortSignal.timeout(25000) });
-      if (!r.ok) throw Object.assign(new Error('HTTP'), { code: 'HTTP' });
-      const buf = Buffer.from(await r.arrayBuffer());
-      if (buf.length > 12 * 1048576) throw Object.assign(new Error('TOO_BIG'), { code: 'TOO_BIG' });
-      const text = buf.toString('utf8');
-      try { fs.writeFileSync(f, text); } catch {}
-      return text;
-    } catch (e) {
-      try { return fs.readFileSync(f, 'utf8'); } catch {}                         // нет сети — берём старую копию
-      throw e;
+    let lastErr = null;
+    for (const url of urls) {
+      try {
+        const r = await net.fetch(url, { headers: { 'User-Agent': UA_DEFAULT }, signal: AbortSignal.timeout(25000) });
+        if (!r.ok) throw Object.assign(new Error('HTTP'), { code: 'HTTP' });
+        const buf = Buffer.from(await r.arrayBuffer());
+        if (buf.length > 12 * 1048576) throw Object.assign(new Error('TOO_BIG'), { code: 'TOO_BIG' });
+        const text = buf.toString('utf8');
+        try { fs.writeFileSync(f, text); } catch {}
+        return text;
+      } catch (e) { lastErr = e; }
     }
+    try { return fs.readFileSync(f, 'utf8'); } catch {}                         // всё упало — берём старую копию
+    throw lastErr || Object.assign(new Error('HTTP'), { code: 'HTTP' });
   }
   const customLists = () => (getStore().tvCustom ||= []);
   async function loadList(entry, force) {
@@ -90,7 +101,7 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
     if (hit && !force && Date.now() - hit.t < PL_TTL) return hit.v;
     let text;
     if (entry.file) { try { text = fs.readFileSync(entry.file, 'utf8'); } catch { throw Object.assign(new Error('FILE'), { code: 'FILE' }); } }
-    else text = await fetchPlaylistText(entry.url, force);
+    else text = await fetchPlaylistText(entry.src || entry.url, force);
     const v = parseM3u(text, { dropAdult: !!entry.builtin });
     mem.set('pl:' + key, { t: Date.now(), v });
     return v;

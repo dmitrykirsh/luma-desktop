@@ -144,6 +144,7 @@ const updater = require('./updater')({ ipcMain, app, getWindow: () => win });
 const tvApi = require('./tv')({ ipcMain, app, protocol, net, dialog, getStore: () => store, saveStore, getWindow: () => win });
 findTrailers = require('./trailers')({ getJson, tm: tmApi }).findTrailers;
 const lbApi = require('./lb')({ ipcMain, safeStorage, getStore: () => store, saveStore, getJson, API, getMainWindow: () => win, tm: tmApi });
+require('./torrents')({ ipcMain, app, net, getWindow: () => win });
 
 let driveApi = null;   // вход Google едет между устройствами как секрет «google» (см. drive-sync.js)
 const backupApi = require('./backup')({
@@ -197,7 +198,7 @@ ipcMain.handle('player:autoplay', async () => {
 ipcMain.handle('trailers', (_e, q) => findTrailers(q));
 ipcMain.handle('store:get', () => store);
 ipcMain.handle('store:set', (_e, k, v) => { store[k] = v; saveStore(); });
-ipcMain.handle('open-external', (_e, url) => { if (/^https:\/\//.test(url)) shell.openExternal(url); });
+ipcMain.handle('open-external', (_e, url) => { if (/^https:\/\//.test(url) || /^vlc:\/\//.test(url)) shell.openExternal(url); });
 ipcMain.handle('win', (_e, a) => {
   if (!win) return;
   if (a === 'min') win.minimize();
@@ -291,7 +292,7 @@ app.whenReady().then(() => {
   );
   // Лишние запросы плеера сайта: пиксели статистики (s.namy.ws) и загрузчик рекламных XML (vuegenesisvue.com /load-xml/). Из-за них в плеере бывают зависания и голос рекламы без картинки.
   // Сам поток (embed.liftw.ws, js.fprxnet.ws, *.interkh.com) не трогаем.
-  session.defaultSession.webRequest.onBeforeRequest(
+  if (!process.env.LUMA_NO_BLOCK) session.defaultSession.webRequest.onBeforeRequest(
     { urls: ['*://s.namy.ws/*', '*://vuegenesisvue.com/*', '*://*.vuegenesisvue.com/*'] },
     (d, cb) => { if (process.env.LUMA_DEBUG_BLOCK) console.log('[blocked]', d.url.slice(0, 100)); cb({ cancel: true }); }
   );

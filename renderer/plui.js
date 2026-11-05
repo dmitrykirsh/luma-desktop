@@ -22,7 +22,11 @@ const PL = (() => {
 
   let S = null, volApplied = false, started = false, resumeAt = 0, idleT = 0, lastPoke = 0, seeking = false, seekRatio = 0, clickT = 0, nextCancelled = false, nextTotal = 0, pop = null;
   let row = null, cache = {};
-  const send = (c, extra) => { try { frame().contentWindow.postMessage(Object.assign({ luma: 'cmd', c }, extra), '*'); } catch {} };
+  const send = (c, extra) => {
+    const m = Object.assign({ luma: 'cmd', c }, extra);
+    try { frame().contentWindow.postMessage(m, '*'); } catch {}
+    try { if (window.__torrDriver) window.__torrDriver(c, m); } catch {}   // торрент-плеер: команды идут в <video> вместо iframe
+  };
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
   const root = () => $('#player');
@@ -285,6 +289,10 @@ const PL = (() => {
     /** Запуск новой серии или фильма: сбрасываем состояние и показываем панели. */
     open(resume) { subLast = null; paintSub(''); S = null; volApplied = false; started = false; resumeAt = resume > 0 ? resume : 0; cache = {}; nextCancelled = false; nextTotal = 0; closePop(); paintNext(null); const p = root(); p.classList.remove('ad', 'noui'); $('#lpWait').classList.remove('on'); $('.lp-prog').style.width = '0'; $('.lp-buf').style.width = '0'; $('#lpT').textContent = '0:00'; $('#lpD').textContent = '0:00'; poke(); },
     close() { clearTimeout(idleT); closePop(); S = null; document.body.classList.remove('lp-has-next'); },
+    /** Состояние от локального движка (торрент-плеер): прогоняем через тот же конвейер, что состояние плеера сайта. */
+    feed(s) { onState(s); },
+    /** Карточка «Следующая серия» (торрент-плеер: s — {title, n} или null чтобы скрыть). */
+    next(nx) { paintNext(nx); },
     setAd(on) { root().classList.toggle('ad', !!on); if (on) $('#lpWait').classList.remove('on'); },
     /** Последнее известное время и длительность (обновляется 4 раза в секунду). */
     time() { return S && S.d > 0 ? { t: S.t, d: S.d, p: S.p } : null; },

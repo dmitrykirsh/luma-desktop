@@ -22,7 +22,8 @@ const ICONS = {
   list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
   live: '<rect x="3" y="7" width="18" height="13" rx="2.5"/><path d="M8 3l4 3.5L16 3"/><circle cx="12" cy="13.500" r="2.200"/>',
   gear: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
-  x: '<path d="M6 6l12 12M18 6L6 18"/>', dice: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8.500 8.500h.01M15.500 8.500h.01M12 12h.01M8.500 15.500h.01M15.500 15.500h.01"/>'
+  x: '<path d="M6 6l12 12M18 6L6 18"/>', dice: '<rect x="4" y="4" width="16" height="16" rx="4"/><path d="M8.500 8.500h.01M15.500 8.500h.01M12 12h.01M8.500 15.500h.01M15.500 15.500h.01"/>',
+  magnet: '<path d="M5 4h5v8a2 2 0 0 0 4 0V4h5v8a7 7 0 0 1-14 0zM5 4v4h5V4zM14 4v4h5V4z"/>'
 };
 const ico = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}">${ICONS[n]}</svg>`;
 
@@ -122,6 +123,8 @@ function toast(msg) {
   $('#toasts').append(t);
   setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 400); }, 2200);
 }
+// тосты завершения синхронизации не перебивают просмотр
+function syncToast(msg) { if (document.body.classList.contains('playing')) return; toast(msg); }
 function rateClass(n) { return n >= 7 ? 'hi' : n >= 5.5 ? 'mid' : 'lo'; }
 const rating = (it) => Number(it.kp_rating || it.kp) || Number(it.imdb_rating || it.imdb) || 0;
 function ambient(url) {
@@ -251,7 +254,7 @@ async function render(route) {
   if (token !== navToken) return;
   main.scrollTop = 0; view.innerHTML = ''; view.onclick = null; view.style.opacity = 1;
   view.className = 'view-in'; void view.offsetWidth;
-  const r = { home: renderHome, section: renderSection, details: renderDetails, favs: renderFavs, history: renderHistory, settings: renderSettings, lists: renderLists, list: renderList, person: renderPerson, tv: renderTv }[route.name];
+  const r = { home: renderHome, section: renderSection, details: renderDetails, favs: renderFavs, history: renderHistory, settings: renderSettings, lists: renderLists, list: renderList, person: renderPerson, tv: renderTv, torrents: renderTorrents }[route.name];
   ambient(null);
   await r(view, route, () => token === navToken);
 }
@@ -591,6 +594,7 @@ async function renderDetails(view, route, alive) {
           <button class="btn primary" id="bWatch">${ico('play')}${watchLabel}</button>
           ${rsm ? '<button class="btn ghost" id="bStart">С начала</button>' : ''}
           <button class="btn ghost" id="bTrailer">${ico('trailer')}Трейлер</button>
+          <button class="btn ghost" id="bTorr">${ico('magnet')}Торренты</button>
           <button class="btn ghost icon fav ${isFav(d.id) ? 'on' : ''}" id="bFav" title="В избранное">${ico('heart')}</button>
         </div>
       </div>
@@ -721,6 +725,7 @@ async function renderDetails(view, route, alive) {
     if (l.length) openTrailer(l[0]); else toast('Трейлера пока нет');
   };
   $('#bFav').onclick = () => { $('#bFav').classList.toggle('on', toggleFav(d)); };
+  $('#bTorr').onclick = () => go({ name: 'torrents', id: d.id });
 }
 
 async function openDetailsAndPlay(it) {
@@ -823,6 +828,26 @@ function autoplayWatch() {
   };
   setTimeout(tick, 1000);
 }
+/* торренты: тот же оверлей плеера, но видео идёт из TorrServe в локальный <video> (TorrPlay), а не из iframe */
+function playTorr(d, fname, streamUrl, fileId) {
+  // ключ прогресса включает файл раздачи: у сериала в торренте каждая серия помнит своё место
+  const key = progKey(d.id) + ':torr:' + fileId;
+  const p = state.progress[key];
+  const resume = p && p.t >= 10 && p.d && p.t < p.d - 45 ? p : null;
+  playing = { d, seasons: [], season: null, episode: null, key, isTorr: true };
+  adActive = false;
+  clearInterval(progTimer); progTimer = setInterval(captureProgress, 5000);
+  document.body.classList.add('playing');
+  addHistory(d, null, null);
+  const player = $('#player');
+  player.classList.remove('hidden', 'idle');
+  $('.pl-loader').classList.add('done');
+  $('#plTitle').textContent = d.name;
+  $('#plSub').textContent = 'Торрент · ' + fname;
+  renderEpsBar();
+  PL.open(resume ? resume.t : 0);
+  TorrPlay.open(streamUrl, resume ? resume.t : 0);
+}
 const CHEV = '<svg viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>';
 const SKIP_PREV = '<svg viewBox="0 0 24 24"><path d="M6 5v14M19 5.500v13L9 12z"/></svg>';
 const SKIP_NEXT = '<svg viewBox="0 0 24 24"><path d="M18 5v14M5 5.500v13L15 12z"/></svg>';
@@ -830,8 +855,8 @@ function renderEpsBar() {
   const { d, seasons, season, episode } = playing;
   const box = $('#plEps');
   closePicker();
+  if (!season) { if (!playing.isTorr) $('#plSub').textContent = [d.year, TYPES[d.type]].filter(Boolean).join(' · '); box.innerHTML = ''; return; }
   $('#plSub').textContent = [d.year, TYPES[d.type]].filter(Boolean).join(' · ');
-  if (!season) { box.innerHTML = ''; return; }
   const s = seasons.find((x) => x.season == season);
   const idx = s.episodes.findIndex((e) => e == episode);
   const si = seasons.indexOf(s);
@@ -889,6 +914,7 @@ async function closePlayer() {
   $('#player').classList.add('hidden'); window.lift.win('fs-off');   // окно закрываем сразу, а время считываем из ещё живого видео
   await captureProgress();
   PL.close();
+  TorrPlay.close();
   $('#plFrame').src = 'about:blank'; playing = null;
   if (currentRoute?.name === 'home' || currentRoute?.name === 'details') render(currentRoute);   // обновим «Остановились на самом интересном» и кнопку «Продолжить»
 }
@@ -1290,6 +1316,7 @@ async function renderSettings(view) {
       
       <pre id="dgOut" class="hint" style="display:none;white-space:pre-wrap;user-select:text;margin-top:12px;font-size:13px;line-height:1.6"></pre>
     </section>
+    <section class="sg" data-g="net" id="torrCard"><div class="sl" id="torrSetWrap"></div></section>
     <section class="sg" data-g="sync" data-t="Аккаунт Google" id="driveSync"><p class="sg-d">История, избранное, прогресс серий, подборки и ключи сервисов хранятся в вашем Google Диске и синхронизируются сами — при запуске, раз в 5 минут и по кнопке, из любой сети, не только домашней.</p><div class="sl"><div id="driveRow"></div></div><p class="hint" id="driveMsg"></p></section>
     <section class="sg" data-g="sync" data-t="Локальная сеть" id="tvSync"><div class="sl"><div class="sr"><div class="sr-t"><b>Синхронизация без аккаунта</b><small>Без аккаунта: ПК, ТВ и телефон в одной сети обмениваются данными сами, пока в ней остаются. Подключить устройство нужно один раз.</small></div><div class="sr-a"><button class="btn primary" id="syncAll">Синхронизировать сейчас</button><button class="btn ghost" id="tvFind">Подключить новое устройство</button></div></div></div>
       
@@ -1308,6 +1335,7 @@ async function renderSettings(view) {
     <section class="sg about" data-g="about"><div class="sl"><div class="sr"><div id="aboutLogo"></div><div><p class="slogan">Включи свою историю</p><p class="hint" style="margin-top:6px" id="aboutVer"></p></div></div></div></section>
   </div></div>`;
   setupSettingsGroups(view);
+  if (typeof renderTorrSettings === 'function') renderTorrSettings($('#torrSetWrap'));
   const msg = $('#tmMsg'), inp = $('#tmKey');
   $$('[data-ext]', view).forEach((b) => b.onclick = () => window.lift.openExternal(b.dataset.ext));
   $('#tmShow').onclick = () => { inp.type = inp.type === 'password' ? 'text' : 'password'; $('#tmShow').textContent = inp.type === 'password' ? 'Показать' : 'Скрыть'; };
@@ -1591,7 +1619,7 @@ function wireTvSync() {
     if (r.error === 'NO_GROUP') { msg.className = 'hint bad'; msg.textContent = 'Сначала подключите устройство: «Подключить новое устройство».'; return; }
     if (r.error === 'BUSY') { msg.textContent = 'Синхронизация уже идёт…'; return; }
     const ok = (r.peers || []).filter((p) => p.ok).map((p) => p.name);
-    if (ok.length) { await initStore(); await refreshTmdb(); updateBadges(); msg.textContent = 'Готово: ' + ok.join(', ') + '. ' + await syncStateText(); toast('Синхронизация завершена'); }
+    if (ok.length) { await initStore(); await refreshTmdb(); updateBadges(); msg.textContent = 'Готово: ' + ok.join(', ') + '. ' + await syncStateText(); syncToast('Синхронизация завершена'); }
     else { msg.className = 'hint bad'; msg.textContent = r.found ? 'Устройства найдены, но обменяться не удалось.' : 'Других устройств группы в сети нет. Включите Luma на ТВ или телефоне.'; }
   };
   const show = (html) => { list.style.display = ''; list.innerHTML = html; };
@@ -1605,7 +1633,7 @@ function wireTvSync() {
       const t = tvs[+b.dataset.i], code = $(`.tvcode[data-i="${b.dataset.i}"]`, list).value;
       const m = $('#tvMsg'); m.className = 'hint'; m.textContent = 'Синхронизируем…'; b.disabled = true;
       const r = await window.lift.syncPush({ ip: t.ip, port: t.port, code }); b.disabled = false;
-      if (r.ok) { await initStore(); await refreshTmdb(); updateBadges(); m.textContent = 'Готово: данные объединены с «' + (r.name || 'ТВ') + '».'; toast('Синхронизация с ТВ завершена'); }
+      if (r.ok) { await initStore(); await refreshTmdb(); updateBadges(); m.textContent = 'Готово: данные объединены с «' + (r.name || 'ТВ') + '».'; syncToast('Синхронизация с ТВ завершена'); }
       else { m.className = 'hint bad'; m.textContent = ERR[r.error] || ERR.ERR; }
     });
   };
@@ -1619,7 +1647,7 @@ window.lift.onSyncRequest((d) => {
   $('#tvAskCode').focus();
   const go = async () => {
     const r = await window.lift.syncCode($('#tvAskCode').value);
-    if (r.ok) { $('#tvAsk')?.remove(); await initStore(); await refreshTmdb(); updateBadges(); toast('Синхронизация с ТВ завершена'); if (currentRoute?.name === 'settings') renderSettings($('#view')); }
+    if (r.ok) { $('#tvAsk')?.remove(); await initStore(); await refreshTmdb(); updateBadges(); syncToast('Синхронизация с ТВ завершена'); if (currentRoute?.name === 'settings') renderSettings($('#view')); }
     else { $('#tvAskMsg').className = 'hint bad'; $('#tvAskMsg').textContent = r.error === 'TOO_MANY' ? 'Слишком много попыток.' : 'Код не подошёл.'; if (r.error === 'TOO_MANY') setTimeout(() => $('#tvAsk')?.remove(), 1500); }
   };
   $('#tvAskOk').onclick = go; $('#tvAskCode').onkeydown = (e) => { if (e.key === 'Enter') go(); };
@@ -1664,7 +1692,7 @@ async function wireDriveSync() {
       const r = await window.lift.driveSync(); $('#driveSyncNow').disabled = false;
       if (r.error) { msg.className = 'hint bad'; msg.textContent = DRIVE_ERR[r.error] || 'Не получилось синхронизировать.'; return; }
       await initStore(); await refreshTmdb(); updateBadges();
-      const s2 = await window.lift.driveState(); renderConnected(s2); toast('Синхронизация завершена');
+      const s2 = await window.lift.driveState(); renderConnected(s2); syncToast('Синхронизация завершена');
     };
     $('#driveOffer').onclick = async () => {
       msg.className = 'hint'; msg.textContent = 'Ищем ТВ и телефоны в сети…';
