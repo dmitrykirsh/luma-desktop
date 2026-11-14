@@ -1,7 +1,7 @@
 {
   "name": "luma-desktop",
   "productName": "Luma",
-  "version": "2.15.0",
+  "version": "2.16.0",
   "description": "Luma — кинотеатр для Windows. Включи свою историю",
   "main": "main.js",
   "scripts": {
@@ -14,8 +14,14 @@
     "productName": "Luma",
     "files": [
       "main.js",
+      "animeon.js",
+      "animeon-auth.js",
+      "skip-times.js",
+      "rutube.js",
+      "rutube-access.js",
       "preload.js",
       "tmdb.js",
+      "anilist.js",
       "lb.js",
       "lbwin-preload.js",
       "renderer/**/*",
@@ -30,7 +36,9 @@
       "drive-creds.json",
       "diag.js",
       "bypass.js",
-      "updater.js"
+      "youtube-bypass.js",
+      "updater.js",
+      "vendor/byedpi/**/*"
     ],
     "win": {
       "target": [
@@ -55,6 +63,9 @@
         "owner": "dmitrykirsh",
         "repo": "luma-desktop"
       }
+    ],
+    "asarUnpack": [
+      "vendor/byedpi/ciadpi.exe"
     ]
   },
   "devDependencies": {

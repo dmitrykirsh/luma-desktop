@@ -2,7 +2,7 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: tmdbimg:; style-src 'self' 'unsafe-inline'; frame-src https:; script-src 'self'; connect-src 'self' lumatv: http://127.0.0.1:8090 http://127.0.0.1:8931; media-src 'self' blob: lumatv: https: http://127.0.0.1:8090 http://127.0.0.1:8931; worker-src 'self' blob:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' https: data: tmdbimg: ytthumb:; style-src 'self' 'unsafe-inline'; frame-src https: file:; script-src 'self'; connect-src 'self' lumatv: http://127.0.0.1:8090 http://127.0.0.1:8931; media-src 'self' blob: lumatv: https: http://127.0.0.1:8090 http://127.0.0.1:8931; worker-src 'self' blob:">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Luma</title>
 <link rel="icon" type="image/svg+xml" href="favicon.svg">
@@ -10,6 +10,7 @@
 <link rel="stylesheet" href="style.css">
 <link rel="stylesheet" href="player.css">
 <link rel="stylesheet" href="tv.css">
+<link rel="stylesheet" href="sport.css">
 <link rel="stylesheet" href="rates.css">
 <link rel="stylesheet" href="update.css">
 </head>
@@ -26,6 +27,7 @@
   </div>
   <button id="searchPill"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg><span>Поиск фильмов и сериалов</span><kbd>Ctrl K</kbd></button>
   <div class="tb-right">
+    <button class="tb-btn notify-btn" id="notificationsButton" title="Уведомления" aria-label="Уведомления"><svg viewBox="0 0 24 24"><path d="M18 8a6 6 0 0 0-12 0c0 7-2 7-2 9h16c0-2-2-2-2-9M10 20h4"/></svg><b id="notificationsCount" class="hidden"></b></button>
     <button class="win-btn" data-win="min"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
     <button class="win-btn" data-win="max"><svg viewBox="0 0 10 10" id="maxIcon" class="max-icon"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
     <button class="win-btn close" data-win="close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10"/></svg></button>
@@ -55,6 +57,7 @@
     <div class="pl-title"><b id="plTitle"></b><span id="plSub"></span></div>
     <div class="pl-eps" id="plEps"></div>
     <div class="lp-drag"></div>
+    <button class="lp-native-toggle hidden" id="lpNativeToggle" title="Показать интерфейс встроенного плеера">Интерфейс плеера</button>
     <div class="pl-win">
       <button class="win-btn" data-win="min" title="Свернуть"><svg viewBox="0 0 10 10"><path d="M0 5h10"/></svg></button>
       <button class="win-btn" data-win="max" title="Развернуть"><svg viewBox="0 0 10 10" class="max-icon"><rect x=".5" y=".5" width="9" height="9"/></svg></button>
@@ -65,15 +68,20 @@
     <iframe id="plFrame" allow="autoplay; fullscreen; encrypted-media; picture-in-picture" allowfullscreen></iframe>
     <div class="lp-click" id="lpClick"></div>
     <div class="lp-shade"></div>
+    <div class="lp-pause-info" id="lpPauseInfo" aria-live="polite"></div>
     <div class="lp-fb" id="lpFb"></div>
     <div class="lp-wait" id="lpWait"></div>
     <div class="lp-sub" id="lpSub"></div>
+    <button class="lp-skip-segment hidden" id="lpSkipSegment"></button>
     <div class="lp-next hidden" id="lpNext"></div>
     <div class="lp-dock" id="lpDock">
       <div class="lp-seek" id="lpSeek"><div class="lp-rail"><i class="lp-buf"></i><i class="lp-prog"></i></div><b class="lp-knob"></b><span class="lp-tip">0:00</span></div>
       <div class="lp-row" id="lpRow"></div>
     </div>
     <div class="lp-pop hidden" id="lpPop"></div>
+  <div class="ao-auth-gate hidden" id="aoAuthGate">
+    <div class="ao-auth-card"><span>AnimeOn</span><h2>Подключите AnimeOn</h2><p id="aoAuthGateMsg">Войдите по почте и паролю, чтобы открыть плеер AnimeOn 2.0.</p><div><button class="btn primary" id="aoAuthPasswordGate">Войти</button></div><button class="ao-auth-close" id="aoAuthCloseGate">Отмена</button></div>
+  </div>
     <div class="pl-pk-back hidden" id="plPkBack"></div>
     <div class="pl-picker hidden" id="plPicker"></div>
     <div class="pl-loader"><div class="pl-logo" id="plLogo"></div></div>
@@ -100,6 +108,7 @@
 <script src="torrplay.js"></script>
 <script src="torrents.js"></script>
 <script src="tv.js"></script>
+<script src="sport.js"></script>
 <script src="update.js"></script>
 </body>
 </html>

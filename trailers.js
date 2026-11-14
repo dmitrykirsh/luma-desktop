@@ -10,8 +10,12 @@ const TRAILER_WORDS = /трейлер|trailer|тизер|teaser|official|офи�
 /** Подходит ли найденное видео фильму t = { name, origin, year }. Возвращает оценку (0 — не подходит). */
 function score(t, v) {
   const title = nrm(v.title);
-  const names = [t.name, t.origin].map(nrm).filter((n) => n.length >= 3);
-  if (!names.some((n) => title.includes(n))) return 0;
+  const base = value => String(value || '').replace(/\s*\[(?:тв|tv)[-\s]*(\d+)\]/ig, '').replace(/\s*\(\d{4}\)\s*$/, '');
+  const names = [t.name, t.origin].map(base).map(nrm).filter((n) => n.length >= 3);
+  const suffixSeason = t.anime && String(t.name || '').match(/(?:\s|\[)(?:тв[-\s]*)?([2-9])\]?$/i);
+  const seasonPattern = suffixSeason && new RegExp('(?:сезон|season)\\s*' + suffixSeason[1] + '|\\b' + suffixSeason[1] + '\\s*(?:сезон|season)', 'i');
+  const alternateNames = seasonPattern && seasonPattern.test(v.title) ? names.map(n => n.replace(/\s+[2-9]$/, '')) : [];
+  if (![...names, ...alternateNames].some((n) => n.length >= 3 && title.includes(n))) return 0;
   if (v.duration != null && (v.duration < 15 || v.duration > 420)) return 0;      // не полный фильм и не нарезка на час
   const yr = Number(t.year) || 0;
   let s = 1;
@@ -20,17 +24,25 @@ function score(t, v) {
     if (ys.length && !ys.includes(yr)) return 0;                                    // «(2022)» у фильма 1995 года
     if (ys.includes(yr)) s += 3;
     else if (yearsIn(v.description).includes(yr)) s += 1;
-    else return 0;                                                                  // нет ни одного признака нужного года
+    else {
+      // Для аниме трейлеры часто опубликованы без года: принимаем только явно
+      // названный трейлер и проверяем номер сезона, если он есть в карточке.
+      if (!t.anime || !/трейлер|trailer|тизер|teaser/i.test(v.title)) return 0;
+      const season = String(t.name || '').match(/\[(?:тв|tv)[-\s]*(\d+)\]/i) || suffixSeason;
+      if (season && Number(season[1]) > 1 && !(new RegExp('(?:сезон|season)\\s*' + season[1] + '|\\b' + season[1] + '\\s*(?:сезон|season)', 'i')).test(v.title)) return 0;
+      if ((!season || Number(season[1]) === 1) && /(?:сезон|season)\s*[2-9]|\b[2-9]\s*(?:сезон|season)/i.test(v.title)) return 0;
+    }
   }
   if (TRAILER_WORDS.test(v.title)) s += 3;
   if (v.duration != null && v.duration <= 240) s += 1;
   return s;
 }
 
-module.exports = function initTrailers({ getJson, tm }) {
+module.exports = function initTrailers({ getJson, tm, youtubeFetch = fetch }) {
   async function rutube(t) {
     const nm = t.name || '', or = t.origin || '', y = t.year || '';
-    const queries = [`${nm} ${y} трейлер`, or && nrm(or) !== nrm(nm) ? `${or} ${y} trailer` : '', `${nm} ${y} официальный трейлер`].filter(Boolean);
+    const animeName = t.anime ? nm.replace(/\s*\[(?:тв|tv)[-\s]*(\d+)\]/ig, ' $1 сезон') : nm;
+    const queries = [`${animeName} ${y} трейлер`, t.anime ? `${animeName} трейлер` : '', or && nrm(or) !== nrm(nm) ? `${or} ${y} trailer` : '', `${nm} ${y} официальный трейлер`].filter(Boolean);
     const seen = new Map();
     await Promise.all(queries.map(async (q) => {
       try {
@@ -55,7 +67,7 @@ module.exports = function initTrailers({ getJson, tm }) {
         const j = await tm.tmdb(`/${kind}/${t.tmdb}/videos`, { include_video_language: 'ru,en,null' }, 3600000);
         const vids = (j.results || []).filter((v) => v.site === 'YouTube' && /^(Trailer|Teaser)$/.test(v.type))
           .sort((a, b) => (b.official - a.official) || (a.iso_639_1 === 'ru' ? -1 : 0) - (b.iso_639_1 === 'ru' ? -1 : 0) || String(b.published_at).localeCompare(String(a.published_at)));
-        for (const v of vids.slice(0, 4)) out.push({ src: 'youtube', id: v.key, title: v.name, thumb: `https://i.ytimg.com/vi/${v.key}/hqdefault.jpg`, url: `https://www.youtube-nocookie.com/embed/${v.key}?autoplay=1&rel=0` });
+        for (const v of vids.slice(0, 4)) out.push({ src: 'youtube', id: v.key, title: v.name, thumb: `ytthumb://image/vi/${v.key}/hqdefault.jpg`, url: `https://www.youtube-nocookie.com/embed/${v.key}?autoplay=1&rel=0` });
       } catch {}
       return out;
     }
@@ -63,13 +75,13 @@ module.exports = function initTrailers({ getJson, tm }) {
     if (Date.now() < ytDownUntil) return out;
     try {
       const q = `${t.name} ${t.year || ''} official trailer`.trim();
-      const r = await fetch('https://www.youtube.com/results?search_query=' + encodeURIComponent(q) + '&hl=ru', { headers: { 'User-Agent': UA_YT, 'Accept-Language': 'ru-RU,ru;q=0.9' }, signal: AbortSignal.timeout(3500) });
+      const r = await youtubeFetch('https://www.youtube.com/results?search_query=' + encodeURIComponent(q) + '&hl=ru', { headers: { 'User-Agent': UA_YT, 'Accept-Language': 'ru-RU,ru;q=0.9' }, signal: AbortSignal.timeout(3500) });
       const html = await r.text();
       for (const m of html.matchAll(/"videoRenderer":\{"videoId":"([\w-]{11})".*?"title":\{"runs":\[\{"text":"(.*?)"\}/g)) {
         let title; try { title = JSON.parse('"' + m[2] + '"'); } catch { continue; }
         if (!score(t, { title, description: '' }) && !(score(t, { title, description: String(t.year) }))) continue;
         if (out.some((x) => x.id === m[1])) continue;
-        out.push({ src: 'youtube', id: m[1], title, thumb: `https://i.ytimg.com/vi/${m[1]}/hqdefault.jpg`, url: `https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1&rel=0` });
+        out.push({ src: 'youtube', id: m[1], title, thumb: `ytthumb://image/vi/${m[1]}/hqdefault.jpg`, url: `https://www.youtube-nocookie.com/embed/${m[1]}?autoplay=1&rel=0` });
         if (out.length >= 3) break;
       }
     } catch { ytDownUntil = Date.now() + 10 * 60 * 1000; }
@@ -82,5 +94,5 @@ module.exports = function initTrailers({ getJson, tm }) {
     const [a, b] = await Promise.all([rutube(t), youtube(t)]);
     return [...a, ...b];
   }
-  return { findTrailers, score };
+  return { findTrailers, findRutubeTrailers: rutube, score };
 };

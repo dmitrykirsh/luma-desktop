@@ -9,7 +9,7 @@ const { dialog } = require('electron');
 
 const FORMAT = 1;
 // кэши и зашифрованные ключи в «данные» не входят: ключи едут отдельным блоком secrets
-const EXCLUDE = (k) => /(Enc|Key)$/.test(k) || k === 'lbMatches' || k === 'matches' || k === 'updSkip';
+const EXCLUDE = (k) => /(Enc|Key)$/.test(k) || k === 'animeonLoginTs' || k === 'lbMatches' || k === 'matches' || k === 'updSkip';
 
 module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWindow, secrets }) {
   let pending = null; // { file, obj }

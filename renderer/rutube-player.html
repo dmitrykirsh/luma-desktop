@@ -1,0 +1,46 @@
+<!doctype html><html><head><meta charset="utf-8"><style>html,body,iframe{display:block;width:100%;height:100%;border:0;margin:0;background:#000;overflow:hidden}</style></head><body><iframe id="rt" allow="autoplay; fullscreen; encrypted-media" allowfullscreen></iframe><script>
+(() => {
+  const params=new URLSearchParams(location.hash.slice(1)), id=params.get('id'), f=document.getElementById('rt');
+  if(!/^[a-f0-9]{32}$/i.test(id||''))return;
+  let ready=false, ad=false, native=false, pendingSeek=Number(params.get('t'))||0;
+  const s={t:0,d:Number(params.get('duration'))||0,p:true,vol:1,m:false,buf:0,wait:true,err:false};
+  const send=(type,data={})=>{if(ready)f.contentWindow.postMessage(JSON.stringify({type,data}),'https://rutube.ru')};
+  const emit=()=>parent.postMessage({luma:'state',st:{...s}},'*');
+  const setAd = value => {if(ad===value)return;ad=value;parent.postMessage({event:value?'adStart':'adStop'},'*');send(value||native?'player:showControls':'player:hideControls')};
+  addEventListener('message',e=>{
+    if(e.source===parent && e.data?.luma==='cmd'){
+      const m=e.data;
+      if(m.c==='native'){native=!!m.v;send(native||ad?'player:showControls':'player:hideControls');return}
+      if(ad)return;
+      if(m.c==='toggle')send(s.p?'player:play':'player:pause');
+      else if(m.c==='play')send('player:play'); else if(m.c==='pause')send('player:pause');
+      else if(m.c==='seek')send('player:setCurrentTime',{time:Number(m.t)||0});
+      else if(m.c==='vol')send('player:setVolume',{volume:Math.max(0,Math.min(1,Number(m.v)))});
+      else if(m.c==='mute')send((m.v===undefined?!s.m:!!m.v)?'player:mute':'player:unMute');
+      else if(m.c==='set'&&m.k==='quality')send('player:changeQuality',{quality:String(m.v)});
+      return;
+    }
+    if(e.origin!=='https://rutube.ru'||e.source!==f.contentWindow)return;
+    let x;try{x=typeof e.data==='string'?JSON.parse(e.data):e.data}catch{return}const d=x?.data||{};
+    switch(x?.type){
+      case 'player:ready':ready=true;send('player:play');send(native?'player:showControls':'player:hideControls');parent.postMessage({event:'playerReady'},'*');break;
+      case 'player:adStart':setAd(true);break;
+      case 'player:adEnd':setAd(false);break;
+      case 'player:rollState':if(d.state==='play')setAd(true);else if(d.state==='complete')setAd(false);break;
+      case 'player:durationChange':if(!ad&&Number(d.duration)>0)s.d=Number(d.duration);break;
+      case 'player:currentTime':if(!ad&&Number.isFinite(Number(d.time)))s.t=Number(d.time);break;
+      case 'player:volumeChange':s.vol=Number(d.volume)||0;s.m=!!d.muted;break;
+      case 'player:qualityList':{const ls=(d.list||[]).map(Number).filter(n=>n>0).sort((a,b)=>a-b);if(ls.length)s.q={v:s.q?.v||ls[ls.length-1],ls};break;}
+      case 'player:currentQuality':if(s.q&&Number(d.quality?.height))s.q.v=Number(d.quality.height);break;
+      case 'player:changeState':
+        if(d.state==='advert'){setAd(true);break}
+        if(['playing','play'].includes(d.state)){setAd(false);s.p=false;s.wait=false;if(pendingSeek>0){send('player:setCurrentTime',{time:pendingSeek});pendingSeek=0}}
+        else if(['paused','pause','stopped'].includes(d.state)){s.p=true;s.wait=false;if(d.state==='stopped'&&s.t>0)parent.postMessage({event:'ended',duration:s.d},'*')}
+        break;
+      case 'player:error':s.err=true;parent.postMessage({event:'playerError'},'*');break;
+    }
+    if(!ad)emit();
+  });
+  f.src='https://rutube.ru/play/embed/'+id+'?autoplay=true&skinColor=ff3366';
+})();
+</script></body></html>

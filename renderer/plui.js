@@ -20,17 +20,27 @@ const PL = (() => {
     check: ic('<path d="M5 12.500l4.500 4.500L19 7.500"/>')
   };
 
-  let S = null, volApplied = false, started = false, resumeAt = 0, idleT = 0, lastPoke = 0, seeking = false, seekRatio = 0, clickT = 0, nextCancelled = false, nextTotal = 0, pop = null;
-  let row = null, cache = {};
+  let S = null, volApplied = false, qualityApplied = false, voiceApplied = false, started = false, resumeAt = 0, idleT = 0, lastPoke = 0, seeking = false, seekRatio = 0, clickT = 0, nextCancelled = false, nextTotal = 0, pop = null;
+  let row = null, cache = {}, subtitleOffset=0, skipKey='', skipTimes=[], skipDone=new Set();
   const send = (c, extra) => {
     const m = Object.assign({ luma: 'cmd', c }, extra);
-    try { frame().contentWindow.postMessage(m, '*'); } catch {}
+    if (playing?.isTorr) { try { window.__torrDriver?.(c, m); } catch {} return; }
+    // Kodik receives commands through the main-process bridge. Sending the
+    // same toggle to its top frame as well immediately undoes pause/play.
+    if (playing?.watch?.source !== 'external') {
+      try { frame().contentWindow.postMessage(m, '*'); } catch {}
+    }
+    // Kodik из Animeon может поместить <video> уровнем глубже iframe. Основной
+    // процесс доставляет ту же команду каждому его фрейму.
+    try { window.lift.playerCommand && window.lift.playerCommand(Object.assign({ c }, extra)); } catch {}
     try { if (window.__torrDriver) window.__torrDriver(c, m); } catch {}   // торрент-плеер: команды идут в <video> вместо iframe
   };
   const lsGet = (k, d) => { try { const v = localStorage.getItem(k); return v === null ? d : v; } catch { return d; } };
   const lsSet = (k, v) => { try { localStorage.setItem(k, String(v)); } catch {} };
+  const qualityHeight = v => { const s=String(v||'').trim().toLowerCase(); if(s==='4k'||s==='uhd')return 2160;if(s==='2k')return 1440;const m=/^(\d{3,4})(?:p|р)?$/.exec(s);return m?Number(m[1]):0; };
   const root = () => $('#player');
   const visible = () => !root().classList.contains('hidden');
+  const playerVoiceKey = () => playing?.d?.id == null ? '' : `${playing.isTorr ? 'torrent' : (playing.watch?.source || 'luma')}:${playing.d.id}`;
 
   function build() {
     row = $('#lpRow');
@@ -40,9 +50,12 @@ const PL = (() => {
       <button class="lp-b skip" id="lpFwd" title="Вперёд на 10 секунд (→)">${IC.fwd}<small>10</small></button>
       <div class="lp-vol"><button class="lp-b" id="lpMute" title="Звук (M)">${IC.vol}</button><input id="lpVol" type="range" min="0" max="100" step="1" value="70"></div>
       <span class="lp-time"><b id="lpT">0:00</b><i>/</i><span id="lpD">0:00</span></span>
-      <span class="grow"></span>
+      <span id="lpEnds" class="lp-ends"></span><span class="grow"></span>
+      <button class="lp-chip" id="lpSleep" data-k="sleep" title="Таймер сна">◷</button>
       <button class="lp-chip hidden" id="lpSp" data-k="sp" title="Скорость"></button>
       <button class="lp-chip hidden" id="lpSnd" data-k="snd" title="Озвучка"></button>
+      <button class="lp-chip hidden" id="lpAoSnd" title="Озвучка AnimeOn"></button>
+      <button class="lp-chip hidden" id="lpRtSnd" title="Другие варианты Rutube"></button>
       <button class="lp-chip hidden" id="lpQ" data-k="q" title="Качество"></button>
       <button class="lp-chip hidden" id="lpCc" data-k="cc" title="Субтитры"></button>
       <button class="lp-b hidden" id="lpFit" title="Вписать в окно / заполнить экран">${IC.fit}</button>
@@ -55,6 +68,8 @@ const PL = (() => {
     $('#plFs').onclick = () => window.lift.win('fs');
     $('#lpFit').onclick = () => { const f = S && S.fit; if (f) send('set', { k: 'fit', v: f.v === 'cover' ? 'contain' : 'cover' }); };
     $$('.lp-chip', row).forEach((b) => { b.onclick = () => (pop === b.dataset.k ? closePop() : openPop(b.dataset.k)); });
+    $('#lpAoSnd').onclick = () => (pop === 'ao' ? closePop() : openPop('ao'));
+    $('#lpRtSnd').onclick = () => { const p=playing; if(p?.rutube) chooseRutube(p.d,p.seasons,p.season,p.episode); };
     row.addEventListener('click', (e) => { const b = e.target.closest('button'); if (b && !b.dataset.k) b.blur(); });
   }
 
@@ -75,7 +90,27 @@ const PL = (() => {
   function onState(s) {
     const first = !S;
     const wasPaused = S ? S.p : true;
+    if (root().classList.contains('native-controls') && S?.q && s.q && qualityHeight(S.q.v) !== qualityHeight(s.q.v) && qualityHeight(s.q.v) > 0) lsSet('pl.quality', qualityHeight(s.q.v));
     S = s;
+    // AnimeOn's own audio is selected before the stream starts. Other players
+    // expose their track names later; apply one unambiguous preference once.
+    if (!voiceApplied && Array.isArray(s.snd?.ls) && s.snd.ls.length > 1 && !playing?.rutube && !(playing?.ao && ['animeon2','external'].includes(playing.watch?.source))) {
+      const saved = state.playerVoicePrefs[playerVoiceKey()];
+      const chosen = preferredPlayerVoice(s.snd.ls, [saved].filter(Boolean));
+      if (chosen) {
+        voiceApplied = true;
+        if (chosen !== s.snd.v) send('set', { k:'sound', v:chosen });
+      }
+    }
+    if (!qualityApplied && Array.isArray(s.q?.ls) && s.q.ls.length) {
+      const preferred = Number(lsGet('pl.quality', '0'));
+      const available = s.q.ls.map(value=>({value,height:qualityHeight(value)})).filter(x=>x.height>0).sort((a,b)=>a.height-b.height);
+      if (preferred > 0 && available.length) {
+        const target = available.filter(x => x.height <= preferred).pop() || available[0];
+        qualityApplied = true;
+        send('set', { k:'quality', v:target.value });
+      }
+    }
     if (first || !volApplied) {
       if (s.d > 0) {
         volApplied = true;
@@ -85,7 +120,11 @@ const PL = (() => {
     }
     if (!started && s.d > 0) {
       started = true;
-      if (resumeAt > 0 && s.t > 0 && Math.abs(s.t - resumeAt) > 1.5 && resumeAt < s.d - 20) { send('seek', { t: resumeAt }); S.t = resumeAt; }   // плеер сайта помнит своё место с точностью до нескольких секунд, возвращаем ровно на сохранённую
+      // The initial click must reach the embedded Kodik player so it can
+      // create the <video>.  Once it has reported a playable duration, our
+      // transparent control surface can safely handle play/pause again.
+      root().classList.add('lp-ready');
+      if (resumeAt > 0 && Math.abs(s.t - resumeAt) > 1.5 && resumeAt < s.d - 20) { send('seek', { t: resumeAt }); S.t = resumeAt; }
       resumeAt = 0;
       if (s.p) send('play');
     }   // человек уже нажал «Смотреть»: сразу играем
@@ -94,6 +133,18 @@ const PL = (() => {
     if (wasPaused !== s.p) poke();
     $('#lpWait').classList.toggle('on', !!s.wait && !s.e);
     root().classList.toggle('noui', !!s.err);
+    root().classList.toggle('paused-info', !!s.p && started && s.d > 0 && !s.wait && !s.err && optGet('luma.pauseDetails','1') !== '0');
+    if(s.p && started && playing?.d) {
+      const d=playing.d, season=playing.season, episode=playing.episode, inf=d.info||{};
+      const epBase=episode ? (d._ao ? `${episode} серия` : `${season} сезон · ${episode} серия`) : '';
+      const ep=[epBase,playing.episodeInfo?.name].filter(Boolean).join(' · ');
+      const description=String(playing.episodeInfo?.overview || inf.description || d.description || '').replace(/<[^>]*>/g,'').trim();
+      const meta=[d.year,inf.time,ep].filter(Boolean).map(esc).join(' · ');
+      const box=$('#lpPauseInfo'), signature=[d.id,season,episode,ep,d._pauseLogo,description].join('|');
+      if(box.dataset.signature!==signature){box.dataset.signature=signature;box.innerHTML=`${d._pauseLogo ? `<img src="${esc(d._pauseLogo)}" alt="${esc(d.name)}">` : `<h2>${esc(d.name)}</h2>`}<p class="lp-pause-meta">${meta}</p>${description ? `<p class="lp-pause-description">${esc(description)}</p>` : ''}<b></b>`;}
+      box.querySelector('b:last-child').textContent=s.d ? `Осталось ${fmtTime(Math.max(0,s.d-s.t))}` : '';
+    }
+    updateSkipSegments(s);
     paintNext(s.nx);
     paintSub(s.cc && s.cc.v === 'Откл' ? '' : s.sub);
     if (s.d > 0) $('.pl-loader').classList.add('done');
@@ -107,6 +158,7 @@ const PL = (() => {
     $('.lp-knob').style.left = r * 100 + '%';
     $('#lpT').textContent = fmtTime(S.t);
     $('#lpD').textContent = fmtTime(d);
+    $('#lpEnds').textContent = d && S.t < d ? 'До ' + new Date(Date.now() + (d-S.t)*1000 / (Number(S.sp?.v)||1)).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}) : '';
   }
 
   function paintVol() {
@@ -122,7 +174,11 @@ const PL = (() => {
   function chip(id, s, html, show) {
     const b = $(id), on = !!s && show;
     b.classList.toggle('hidden', !on);
-    if (on && cache[id] !== html) { b.innerHTML = html; cache[id] = html; }
+    if (on && cache[id] !== html) {
+      b.innerHTML = html; cache[id] = html;
+      const label=b.querySelector('.lp-marquee'), text=label?.firstElementChild;
+      if(label && text) requestAnimationFrame(()=>{const overflow=Math.max(0,text.scrollWidth-label.clientWidth);label.style.setProperty('--lp-overflow',overflow+'px');label.classList.toggle('overflow',overflow>2);});
+    }
     return b;
   }
 
@@ -132,9 +188,15 @@ const PL = (() => {
     if (cache.play !== play) { $('#lpPlay').innerHTML = play; cache.play = play; }
     paintVol();
     chip('#lpSp', s.sp, `<span>${s.sp ? s.sp.v : 1}×</span>`, s.sp && s.sp.ls.length > 1);
-    chip('#lpSnd', s.snd, s.snd ? `${IC.snd}<span>${esc(String(s.snd.v))}</span>` : '', s.snd && s.snd.ls.length > 1);
-    const qb = chip('#lpQ', s.q, s.q ? `<span>${s.q.v}p</span>` : '', s.q && s.q.ls.length > 1);
-    qb.classList.toggle('hq', !!s.q && s.q.v >= 1080);
+    const aoTracks = animeonVoiceState();
+    const voiceLabel = value => `<span class="lp-marquee"><span class="lp-marquee-text">${esc(String(value || ''))}</span></span>`;
+    const sound = chip('#lpSnd', s.snd, s.snd ? `${IC.snd}${voiceLabel(s.snd.v)}` : '', !aoTracks && s.snd && s.snd.ls.length > 1);
+    if(s.snd) sound.title=String(s.snd.v);
+    const aoSound = chip('#lpAoSnd', aoTracks, aoTracks ? `${IC.snd}${voiceLabel(aoTracks.v)}` : '', aoTracks && aoTracks.ls.length > 0);
+    if(aoTracks) aoSound.title=String(aoTracks.v);
+    chip('#lpRtSnd', playing?.rutube ? {} : null, `${IC.snd}<span>${esc(playing?.watch?.voice || 'Варианты')}</span>`, !!playing?.rutube);
+    const qb = chip('#lpQ', s.q, s.q ? `<span>${esc(String(s.q.v))}${/^\d+$/.test(String(s.q.v)) ? 'p' : ''}</span>` : '', s.q && s.q.ls.length > 1);
+    qb.classList.toggle('hq', !!s.q && qualityHeight(s.q.v) >= 1080);
     chip('#lpCc', s.cc, s.cc ? `${IC.cc}<span>${esc(s.cc.v === 'Откл' ? 'Откл' : ccShort(s.cc.v))}</span>` : '', s.cc && s.cc.ls.length > 1);
     $('#lpFit').classList.toggle('hidden', !s.fit);
     if (pop) paintPop();
@@ -154,6 +216,25 @@ const PL = (() => {
     const el = $('#lpSub'), h = subHtml(text);
     el.innerHTML = h ? `<span>${h}</span>` : '';
     el.classList.toggle('on', !!h);
+  }
+
+  function updateSkipSegments(s) {
+    const p=playing, btn=$('#lpSkipSegment');
+    if(!p || !s.d || root().classList.contains('native-controls') || root().classList.contains('ad')) {btn.classList.add('hidden');return;}
+    const key=[p.d?.id,p.episode,p.watch?.source,Math.round(s.d)].join(':');
+    if(skipKey!==key){
+      skipKey=key;skipTimes=[];skipDone.clear();
+      if(p.watch?.source==='animeon2') skipTimes=(p.officialSkips||[]).filter(x=>x.end<=s.d+1);
+      else if(p.ao?.shikimori && p.episode && !p.isTorr && !p.rutube){
+        window.lift.animeSkipTimes({id:p.ao.shikimori,episode:Number(p.episode),duration:s.d}).then(times=>{if(skipKey===key)skipTimes=times||[]}).catch(()=>{});
+      }
+    }
+    const segment=skipTimes.find(x=>s.t>=x.start && s.t<x.end && !skipDone.has(`${x.type}:${x.start}`));
+    if(!segment){btn.classList.add('hidden');return;}
+    const label=segment.type==='op'?'опенинг':'эндинг';btn.textContent='Пропустить '+label;btn.classList.remove('hidden');
+    const go=()=>{skipDone.add(`${segment.type}:${segment.start}`);send('seek',{t:segment.end});btn.classList.add('hidden');};
+    btn.onclick=go;
+    if(!s.p && optGet(segment.type==='op'?'luma.autoSkipOpening':'luma.autoSkipEnding','0')==='1')go();
   }
 
   /* ---------- «Следующая серия» ---------- */
@@ -179,18 +260,32 @@ const PL = (() => {
   const POP = {
     sp: { title: 'Скорость', key: 'sp', label: (v) => (v === 1 ? 'Обычная' : v + '×') },
     snd: { title: 'Озвучка', key: 'snd', label: (v) => String(v) },
-    q: { title: 'Качество', key: 'q', label: (v) => v + 'p' },
+    ao: { title: 'Озвучка AnimeOn', key: 'ao', label: (v) => String(v) },
+    q: { title: 'Качество', key: 'q', label: (v) => /^\d+$/.test(String(v)) ? v + 'p' : String(v) },
+    sleep: { title: 'Таймер сна', key: 'sleep', label: (v) => v === 0 ? 'Выключен' : `${v} минут` },
     cc: { title: 'Субтитры', key: 'cc', label: (v) => (v === 'Откл' ? 'Выключены' : ccShort(v)) }
   };
+  let sleepTimer=null, sleepDeadline=0;
+  const sleepState=()=>({v:sleepDeadline ? Math.round((sleepDeadline-Date.now())/60000) : 0,ls:[0,15,30,45,60]});
+  const popState=k=>k==='sleep' ? sleepState() : k==='ao' ? animeonVoiceState() : S && S[POP[k].key];
   const SET_KEY = { sp: 'speed', snd: 'sound', q: 'quality', cc: 'cc' };
+  function animeonVoiceState() {
+    const p = playing;
+    if (!(p?.ao || p?.d?._ao) || !['animeon2', 'external'].includes(p.watch?.source)) return null;
+    const ao = p.ao || p.d._ao, ep = String(p.season ? p.episode : (ao.episodes[0] ?? 1));
+    const available = ao.voiceNames.filter((v) => !!ao.voices[v]?.[ep]);
+    const tracks = p.watch.source === 'animeon2' ? S?.snd?.ls : null;
+    return { v: p.d._aoSrc?.voice || p.watch?.voice || '', ls: tracks?.length ? available.filter((v) => tracks.includes(v)) : available };
+  }
   function paintPop() {
-    const d = POP[pop], st = S && S[d.key]; if (!st) { closePop(); return; }
+    const d = POP[pop], st = popState(pop); if (!st) { closePop(); return; }
     const html = `<h4>${d.title}</h4>` + st.ls.map((v, i) => `<button class="lp-opt ${v === st.v ? 'on' : ''}" data-i="${i}"><span>${esc(d.label(v))}</span>${IC.check}</button>`).join('');
-    const extra = pop === 'cc' ? `<h4>Размер</h4><div class="lp-sizes">${SUB_SIZES.map(([k, l]) => `<button class="lp-sz ${k === subSize ? 'on' : ''}" data-sz="${k}">${l}</button>`).join('')}</div>` : '';
+    const sync = pop === 'cc' && S?.subSync ? `<h4>Синхронизация</h4><div class="lp-sizes"><button class="lp-sz" data-subshift="-0.5" aria-label="Субтитры раньше">−0,5 с</button><button class="lp-sz" data-subshift="reset">${subtitleOffset > 0 ? '+' : ''}${subtitleOffset.toFixed(1)} с</button><button class="lp-sz" data-subshift="0.5" aria-label="Субтитры позже">+0,5 с</button></div>` : '';
+    const extra = pop === 'cc' ? sync + `<h4>Размер</h4><div class="lp-sizes">${SUB_SIZES.map(([k, l]) => `<button class="lp-sz ${k === subSize ? 'on' : ''}" data-sz="${k}">${l}</button>`).join('')}</div><h4>Цвет</h4><div class="lp-sizes">${[['white','Белый'],['yellow','Жёлтый']].map(([k,l])=>`<button class="lp-sz" data-subcolor="${k}">${l}</button>`).join('')}</div><h4>Фон</h4><div class="lp-sizes"><button class="lp-sz" data-subbg="dark">Тёмный</button><button class="lp-sz" data-subbg="none">Без фона</button></div><h4>Расположение</h4><div class="lp-sizes"><button class="lp-sz" data-subpos="bottom">Внизу</button><button class="lp-sz" data-subpos="higher">Выше</button></div><h4>Шрифт</h4><div class="lp-sizes"><button class="lp-sz" data-subfont="default">Обычный</button><button class="lp-sz" data-subfont="serif">С засечками</button></div>` : '';
     const box = $('#lpPop'); if (cache.pop !== html + extra) { box.innerHTML = html + extra; cache.pop = html + extra; }
   }
   function openPop(k) {
-    if (!S || !S[POP[k].key]) return;
+    if (!S || !popState(k)) return;
     pop = k; cache.pop = null; $('#lpPop').classList.remove('hidden'); root().classList.add('pop-open');
     $$('.lp-chip', row).forEach((b) => b.classList.toggle('open', b.dataset.k === k));
     paintPop();
@@ -199,10 +294,46 @@ const PL = (() => {
   }
   function closePop() { pop = null; $('#lpPop').classList.add('hidden'); root().classList.remove('pop-open'); $$('.lp-chip', row).forEach((b) => b.classList.remove('open')); poke(); }
   $('#lpPop').addEventListener('click', (e) => {
-    const z = e.target.closest('.lp-sz');
+    const shift=e.target.closest('button[data-subshift]');
+    if(shift){subtitleOffset=shift.dataset.subshift==='reset'?0:Math.max(-30,Math.min(30,subtitleOffset+Number(shift.dataset.subshift))); if(playing?.isTorr)send('set',{k:'subOffset',v:subtitleOffset});else send('subOffset',{v:subtitleOffset});cache.pop=null;paintPop();return;}
+    const color=e.target.closest('button[data-subcolor]'), bg=e.target.closest('button[data-subbg]');
+    if(color){root().dataset.subcolor=color.dataset.subcolor;lsSet('pl.subcolor',color.dataset.subcolor);return;}
+    if(bg){root().dataset.subbg=bg.dataset.subbg;lsSet('pl.subbg',bg.dataset.subbg);return;}
+    const pos=e.target.closest('button[data-subpos]'), font=e.target.closest('button[data-subfont]');
+    if(pos){root().dataset.subpos=pos.dataset.subpos;lsSet('pl.subpos',pos.dataset.subpos);return;}
+    if(font){root().dataset.subfont=font.dataset.subfont;lsSet('pl.subfont',font.dataset.subfont);return;}
+    const z = e.target.closest('[data-sz]');
     if (z) { subSize = z.dataset.sz; lsSet('pl.subsize', subSize); applySubSize(); paintPop(); return; }
     const o = e.target.closest('.lp-opt'); if (!o || !pop || !S) return;
-    const d = POP[pop], st = S[d.key], v = st.ls[+o.dataset.i];
+    const d = POP[pop], st = popState(pop), v = st.ls[+o.dataset.i];
+    if(pop==='sleep'){clearTimeout(sleepTimer);sleepDeadline=v ? Date.now()+v*60000 : 0;if(v)sleepTimer=setTimeout(()=>{sleepDeadline=0;if(visible() && S && !S.p)send('pause');toast('Таймер сна: воспроизведение остановлено');},v*60000);$('#lpSleep').classList.toggle('on',!!v);closePop();return;}
+    if (pop === 'ao') {
+      const p = playing; closePop();
+      if (!p || !v || v === p.d._aoSrc?.voice) return;
+      if (p.watch.source === 'animeon2' && S.snd?.ls.includes(v)) {
+        p.d._aoSrc = { ...(p.d._aoSrc || {}), voice: v };
+        p.watch.voice = v;
+        saveWatchPref(p.d, p.ao || p.d._ao, p.d._aoSrc);
+        send('set', { k: 'sound', v });
+        paint();
+        return;
+      }
+      captureProgress().catch(() => {}).finally(() => {
+        if (playing !== p) return;
+        p.d._aoSrc = { ...(p.d._aoSrc || {}), voice: v };
+        saveWatchPref(p.d, p.ao || p.d._ao, p.d._aoSrc);
+        playItem(p.d, p.seasons, p.season, p.episode);
+      });
+      return;
+    }
+    if (pop === 'q' && qualityHeight(v) > 0) { lsSet('pl.quality', qualityHeight(v)); qualityApplied = true; }
+    if (pop === 'snd' && v && playerVoiceKey()) {
+      voiceApplied = true;
+      state.playerVoicePrefs[playerVoiceKey()] = v;
+      const keys = Object.keys(state.playerVoicePrefs);
+      if (keys.length > 500) delete state.playerVoicePrefs[keys[0]];
+      persist('playerVoicePrefs');
+    }
     send('set', { k: SET_KEY[pop], v });
     st.v = v; paint(); closePop();
   });
@@ -284,11 +415,11 @@ const PL = (() => {
     if (used) { e.preventDefault(); poke(); document.activeElement && document.activeElement.blur && document.activeElement !== $('#lpVol') && document.activeElement.blur(); }
   });
 
-  build(); applySubSize();
+  build(); applySubSize(); root().dataset.subcolor=lsGet('pl.subcolor','white');root().dataset.subbg=lsGet('pl.subbg','dark');root().dataset.subpos=lsGet('pl.subpos','bottom');root().dataset.subfont=lsGet('pl.subfont','default');
   return {
     /** Запуск новой серии или фильма: сбрасываем состояние и показываем панели. */
-    open(resume) { subLast = null; paintSub(''); S = null; volApplied = false; started = false; resumeAt = resume > 0 ? resume : 0; cache = {}; nextCancelled = false; nextTotal = 0; closePop(); paintNext(null); const p = root(); p.classList.remove('ad', 'noui'); $('#lpWait').classList.remove('on'); $('.lp-prog').style.width = '0'; $('.lp-buf').style.width = '0'; $('#lpT').textContent = '0:00'; $('#lpD').textContent = '0:00'; poke(); },
-    close() { clearTimeout(idleT); closePop(); S = null; document.body.classList.remove('lp-has-next'); },
+    open(resume) { subtitleOffset=0;skipKey='';skipTimes=[];skipDone.clear();$('#lpSkipSegment').classList.add('hidden');subLast = null; paintSub(''); S = null; volApplied = false; qualityApplied = false; voiceApplied = false; started = false; resumeAt = resume > 0 ? resume : 0; cache = {}; nextCancelled = false; nextTotal = 0; closePop(); paintNext(null); const p = root(); p.classList.remove('ad', 'noui', 'lp-ready', 'paused-info'); $('#lpAoSnd').classList.add('hidden'); $('#lpRtSnd').classList.add('hidden'); $('#lpWait').classList.remove('on'); $('.lp-prog').style.width = '0'; $('.lp-buf').style.width = '0'; $('#lpT').textContent = '0:00'; $('#lpD').textContent = '0:00'; poke(); },
+    close() { skipKey='';skipTimes=[];$('#lpSkipSegment').classList.add('hidden');clearTimeout(idleT); clearTimeout(sleepTimer); sleepDeadline=0; root().classList.remove('paused-info'); $('#lpSleep').classList.remove('on'); closePop(); S = null; document.body.classList.remove('lp-has-next'); },
     /** Состояние от локального движка (торрент-плеер): прогоняем через тот же конвейер, что состояние плеера сайта. */
     feed(s) { onState(s); },
     /** Карточка «Следующая серия» (торрент-плеер: s — {title, n} или null чтобы скрыть). */
@@ -299,7 +430,7 @@ const PL = (() => {
     popOpen: () => !!pop,
     closePop,
     poke,
-    onMessage(e) { const m = e.data; if (!m || !m.luma || e.source !== frame().contentWindow) return; if (m.st) onState(m.st); else if (m.sub !== undefined && S && !(S.cc && S.cc.v === 'Откл')) paintSub(m.sub); },
+    onMessage(e) { if (playing?.isTorr) return; const m = e.data; if (!m || !m.luma || e.source !== frame().contentWindow) return; if (m.st) onState(m.st); else if (m.sub !== undefined && S && !(S.cc && S.cc.v === 'Откл')) paintSub(m.sub); },
     setFs(on) { const b = $('#plFs'); if (b) b.innerHTML = on ? IC.fsOff : IC.fs; }
   };
 })();

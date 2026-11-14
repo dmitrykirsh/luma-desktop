@@ -156,6 +156,11 @@ module.exports = ({ ipcMain, app, net, getWindow }) => {
         if (fs.existsSync(p)) return p;
       }
     } catch {}
+    for (const part of (process.env.PATH || '').split(path.delimiter)) {
+      if (!part) continue;
+      const candidate = path.join(part.replace(/^"|"$/g, ''), name);
+      if (fs.existsSync(candidate)) return candidate;
+    }
     return root;
   };
   const ffExe = () => ffFind('ffmpeg.exe');
@@ -224,19 +229,32 @@ module.exports = ({ ipcMain, app, net, getWindow }) => {
     if (!(await ensureFfmpeg())) return { ok: false, error: 'ffmpeg' };
     const key = String(src);
     if (probeCache.has(key)) return probeCache.get(key);
-    const r = await run(ffProbe(), ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', '-select_streams', 'a', key], 90000);
+    const r = await run(ffProbe(), ['-v', 'quiet', '-print_format', 'json', '-show_streams', '-show_format', key], 90000);
     if (!r || r.code !== 0) return { ok: false, error: 'probe' };
     let j; try { j = JSON.parse(r.out); } catch { return { ok: false, error: 'probe json' }; }
-    const streams = (j.streams || []).map((s, i) => ({
+    const streams = (j.streams || []).filter(s => s.codec_type === 'audio').map((s, i) => ({
       i,
       codec: String(s.codec_name || ''),
+      ch: Number(s.channels) || 0,
       lang: String((s.tags && s.tags.language) || ''),
       name: String((s.tags && s.tags.title) || '') ||
         ({ ru: 'Русский', uk: 'Украинский', en: 'Английский', ja: 'Японский' })[String((s.tags && s.tags.language) || '').slice(0, 2)] ||
         'Дорожка ' + (i + 1),
       def: !!(s.disposition && s.disposition.default)
     }));
-    const res = { ok: true, audio: streams, cur: (streams.find((s) => s.def) || streams[0] || {}).name, dur: Number(j.format && j.format.duration) || 0 };
+    const names = new Map();
+    for (const s of streams) names.set(s.name, (names.get(s.name) || 0) + 1);
+    for (const s of streams) if (names.get(s.name) > 1) s.name += ' · дорожка ' + (s.i + 1);
+    const subtitles = (j.streams || []).filter(s => s.codec_type === 'subtitle').map((s, i) => ({
+      i, codec:String(s.codec_name || ''),
+      name:String(s.tags?.title || '') || ({ ru:'Русский', uk:'Украинский', en:'Английский', ja:'Японский' })[String(s.tags?.language || '').slice(0,2)] || 'Субтитры ' + (i + 1),
+      supported:['subrip','srt','ass','ssa','webvtt','mov_text','text'].includes(String(s.codec_name || ''))
+    }));
+    const subtitleNames = new Map();
+    for (const s of subtitles) subtitleNames.set(s.name, (subtitleNames.get(s.name) || 0) + 1);
+    for (const s of subtitles) { if (subtitleNames.get(s.name) > 1) s.name += ' · дорожка ' + (s.i + 1); if (!s.supported) s.name += ' · графические'; }
+    const video = (j.streams || []).find(s => s.codec_type === 'video');
+    const res = { ok: true, audio: streams, subtitles, video:video ? {codec:String(video.codec_name || ''),width:Number(video.width)||0,height:Number(video.height)||0} : null, cur: (streams.find((s) => s.def) || streams[0] || {}).name, dur: Number(j.format && j.format.duration) || 0 };
     probeCache.set(key, res);
     return res;
   });
@@ -245,10 +263,22 @@ module.exports = ({ ipcMain, app, net, getWindow }) => {
   const http = require('http');
   const fxServer = http.createServer((req, res) => {
     const u = new URL(req.url, 'http://x');
-    if (u.pathname !== '/fx') { res.writeHead(404); res.end(); return; }
+    if (!['/fx', '/sub'].includes(u.pathname)) { res.writeHead(404); res.end(); return; }
     const src = u.searchParams.get('src') || '', a = u.searchParams.get('a') || '0';
     const ss = parseFloat(u.searchParams.get('ss') || '0') || 0;
     if (!/^https?:\/\/127\.0\.0\.1:8090\/stream\//.test(src)) { res.writeHead(400); res.end(); return; }
+    if (u.pathname === '/sub') {
+      const index = Number(u.searchParams.get('s'));
+      const sub = Number.isInteger(index) && index >= 0 ? probeCache.get(src)?.subtitles?.[index] : null;
+      if (!sub?.supported) { res.writeHead(400); res.end(); return; }
+      res.writeHead(200, { 'Content-Type':'text/vtt; charset=utf-8', 'Access-Control-Allow-Origin':'*', 'Cache-Control':'no-store' });
+      let child;
+      try { child = spawn(ffExe(), ['-hide_banner','-loglevel','error','-i',src,'-map','0:s:' + index,'-c:s','webvtt','-flush_packets','1','-f','webvtt','pipe:1'], { windowsHide:true }); }
+      catch { res.end(); return; }
+      child.stdout.pipe(res); child.stderr.on('data',()=>{}); child.on('error',()=>res.end());
+      res.on('close',()=>{ try { child.kill(); } catch {} });
+      return;
+    }
     res.writeHead(200, {
       'Content-Type': 'video/mp4',
       'Access-Control-Allow-Origin': '*',
@@ -256,22 +286,40 @@ module.exports = ({ ipcMain, app, net, getWindow }) => {
     });
     let ps;
     try {
-      // AAC из MKV в MP4 требует конвертации заголовков (AudioSpecificConfig)
+      /* Chromium/Electron играет в MSE только AAC/Opus/FLAC/MP3. AC-3/E-AC-3/DTS и прочее
+         из торрентов декодируются браузером — только тишина, видео при этом идёт.
+         Поддержанные кодеки копируем, остальное транскодируем в AAC на лету. */
       const probed = probeCache.get(src);
-      const codec = probed && probed.audio && probed.audio[+a] && probed.audio[+a].codec;
-      const bsf = codec === 'aac' ? ['-bsf:a', 'aac_adtstoasc'] : [];
+      const tr = probed && probed.audio && probed.audio[+a];
+      const codec = tr && tr.codec;
+      // Chromium's Windows MSE decoder rejects some multichannel AAC layouts.
+      // Downmix during remux so DTS/E-AC-3 and multichannel tracks stay playable.
+      const copyAudio = { aac: 1, opus: 1, flac: 1, mp3: 1 }[codec] && (!tr?.ch || tr.ch <= 2);
       const args = ['-hide_banner', '-loglevel', 'error'];
       if (ss > 0) args.push('-ss', String(ss));
       // важно: поток от точки seek всегда 0-based; рендерер считает абсолютную позицию как ss + currentTime
-      args.push('-i', src, '-map', '0:v:0', '-map', '0:a:' + a, '-c', 'copy', ...bsf, '-f', 'mp4',
-        '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1');
+      // MP4 chapters create an extra timed-text track that Chromium MSE cannot decode.
+      args.push('-i', src, '-map', '0:v:0', '-map', '0:a:' + a, '-map_chapters', '-1', '-c:v', 'copy');
+      if (copyAudio) {
+        args.push('-c:a', 'copy');
+        if (codec === 'aac') args.push('-bsf:a', 'aac_adtstoasc');  // AAC в MP4: ADTS → AudioSpecificConfig
+      } else args.push('-c:a', 'aac', '-ac', '2', '-b:a', '192k');
+      args.push('-f', 'mp4', '-movflags', 'frag_keyframe+empty_moov+default_base_moof', 'pipe:1');
       ps = spawn(ffExe(), args, { windowsHide: true });
     } catch { res.end(); return; }
     ps.stdout.pipe(res);
     ps.stderr.on('data', () => {});
     const kill = () => { try { ps.kill(); } catch {} };
     res.on('close', kill);
-    req.on('close', kill);
+  });
+  // Второй экземпляр Luma (например, dev-сборка рядом с установленной)
+  // может застать этот порт занятым. `listen` сообщает EADDRINUSE
+  // асинхронно, поэтому одного try/catch недостаточно и Electron падал
+  // ещё при старте. В таком случае просто не доступна пересборка дорожки
+  // торрента в этом экземпляре; остальная программа, включая онлайн-плеер,
+  // продолжает работать.
+  fxServer.on('error', (err) => {
+    if (!err || err.code !== 'EADDRINUSE') console.warn('Torrent FX server:', err);
   });
   try { fxServer.listen(FX_PORT, '127.0.0.1'); } catch {}
 

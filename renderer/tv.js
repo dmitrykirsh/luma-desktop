@@ -1,11 +1,11 @@
 'use strict';
 /* ================= Телевизор ================= */
 const TVS = {
-  scope: 'stable', country: '', cat: 'Все', q: '', channels: [], byId: new Map(), errors: [], lists: null,
+  scope: 'rutube', country: '', cat: 'Все', q: '', channels: [], byId: new Map(), errors: [], lists: null,
   epg: {}, alias: {}, epgAt: 0, epgBusy: false, epgErr: '',
   hls: null, cur: null, srcIdx: 0, timers: {}, shown: 0, tick: null
 };
-const TV_SCOPES = [['stable', 'Стабильные'], ['all', 'Все каналы'], ['wide', 'По странам'], ['mine', 'Мои плейлисты']];
+const TV_SCOPES = [['rutube', 'Rutube'], ['stable', 'Стабильные'], ['all', 'Все каналы'], ['wide', 'По странам'], ['mine', 'Мои плейлисты']];
 const tvTok = (o) => btoa(unescape(encodeURIComponent(JSON.stringify(o)))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const tvUrl = (s) => 'lumatv://p/' + tvTok({ u: s.url, ua: s.ua || '', ref: s.ref || '' });
 const hm = (t) => new Date(t).toLocaleTimeString('ru', { hour: '2-digit', minute: '2-digit' });
@@ -98,7 +98,8 @@ async function renderTv(view, route, alive) {
   view.innerHTML = '<div class="empty"><div class="spin" style="margin:0 auto"></div><p style="margin-top:14px">Загружаем каналы…</p></div>';
   const lists = await window.lift.tvLists();
   if (!alive()) return;
-  TVS.scope = route.scope || state.tvPrefs.scope || 'stable';
+  if (!state.tvPrefs.rutubeDefault) { state.tvPrefs.scope = 'rutube'; state.tvPrefs.rutubeDefault = true; persist('tvPrefs'); }
+  TVS.scope = route.scope || state.tvPrefs.scope || 'rutube';
   if (TVS.scope === 'world') TVS.scope = 'stable';   // вкладку «Мир» убрали: мировые каналы теперь в «По странам»
   TVS.country = state.tvPrefs.country || '';
   // сохранённый раздел «Мои плейлисты» без единого включённого плейлиста не показываем пустым
@@ -108,6 +109,11 @@ async function renderTv(view, route, alive) {
   TVS.lists = lists; TVS.errors = (chs && chs.errors) || [];
   if (chs.error) { view.innerHTML = '<div class="empty"><h3>Не получилось загрузить каналы</h3>Проверьте интернет и попробуйте ещё раз<br><br><button class="btn primary" id="tvRetry">Повторить</button></div>'; $('#tvRetry').onclick = () => render(currentRoute); return; }
   TVS.channels = chs.channels; TVS.byId = new Map(TVS.channels.map((c) => [c.id, c]));
+  if (route.sportItem && /^[a-f0-9]{32}$/i.test(String(route.sportItem.id || ''))) {
+    const s = route.sportItem, existing = TVS.channels.find(c => c.sources?.some(src => src.kind === 'rutube' && src.id === s.id)), id = existing?.id || 'rt:' + s.id;
+    const channel = existing || { id, name:String(s.title || 'Спортивный эфир'), group:'Спорт · Rutube', logo:String(s.logo || ''), tvg:'', sources:[{kind:'rutube',id:s.id}] };
+    TVS.channels = [channel, ...TVS.channels.filter(c => c.id !== id)]; TVS.byId = new Map(TVS.channels.map(c => [c.id, c])); route.ch = id;
+  }
   if (route.ch && TVS.byId.has(route.ch)) return tvWatch(view, route, alive);
   return tvBrowse(view, alive);
 }
@@ -308,6 +314,7 @@ function tvStatus(kind, text, actions) {
   if (kind === 'error') { $('#tvRetryCh').onclick = () => tvStart(TVS.cur, 0); $('#tvNextCh').onclick = () => tvZap(1); }
 }
 function tvTeardown() {
+  TVS.generation = (TVS.generation || 0) + 1;
   clearTimeout(TVS.timers.wd); clearTimeout(TVS.timers.count); clearInterval(TVS.timers.watch);
   if (TVS.hls) { try { TVS.hls.destroy(); } catch {} TVS.hls = null; }
   const v = $('#tvVideo'); if (v) { try { v.pause(); } catch {} v.removeAttribute('src'); try { v.load(); } catch {} }
@@ -321,12 +328,19 @@ function tvNext(reason) {
   if (TVS.srcIdx + 1 < ch.sources.length) { tvStatus('loading', 'Пробуем другой источник…'); tvStart(ch, TVS.srcIdx + 1); }
   else { tvTeardown(); tvStatus('error', 'Канал сейчас недоступен'); }
 }
-function tvStart(ch, srcIdx) {
+async function tvStart(ch, srcIdx) {
   tvTeardown(); TVS.cur = ch; TVS.srcIdx = srcIdx; TVS.started = false;
+  const generation = TVS.generation;
   const v = $('#tvVideo'); if (!v) return;
-  const src = ch.sources[srcIdx];
+  let src = ch.sources[srcIdx];
   if (!src) return tvNext('no-source');
   tvStatus('loading', srcIdx ? 'Пробуем другой источник…' : 'Загружаем поток…');
+  if (src.kind === 'rutube') {
+    const stream = await window.lift.rutubeStream(src.id).catch(() => null);
+    if (generation !== TVS.generation || TVS.cur !== ch || TVS.srcIdx !== srcIdx) return;
+    if (!stream) return tvNext('rutube-unavailable');
+    src = { ...src, url:stream };
+  }
   if (/\.mpd(\?|#|$)/i.test(src.url)) return tvNext('dash');                        // DASH пока не поддерживается: идём к следующему источнику
   v.volume = state.tvPrefs.vol ?? 1; v.muted = !!state.tvPrefs.muted; tvPaintVol();
   const url = tvUrl(src); let netTries = 0, mediaTries = 0;
@@ -334,7 +348,12 @@ function tvStart(ch, srcIdx) {
   if (/\.(mp4|webm|mp3|aac|ogg|m4a)(\?|#|$)/i.test(src.url)) { v.src = url; v.play().catch(() => tvStatus('', '')); }
   else if (window.Hls && Hls.isSupported()) {
     const h = new Hls({ maxBufferLength: 24, backBufferLength: 20, liveSyncDurationCount: 3, manifestLoadingTimeOut: 15000, levelLoadingTimeOut: 15000, fragLoadingTimeOut: 25000, manifestLoadingMaxRetry: 1, levelLoadingMaxRetry: 2, fragLoadingMaxRetry: 3 });
-    h.on(Hls.Events.MANIFEST_PARSED, () => { buildQuality(h); v.play().catch(() => tvStatus('', '')); });
+    h.on(Hls.Events.MANIFEST_PARSED, () => {
+      const preferred = Number(localStorage.getItem('pl.quality'));
+      const levels = h.levels.map((level, i) => ({ i, height:Number(level.height) || 0 })).filter(x => x.height > 0).sort((a,b) => a.height - b.height);
+      if (preferred > 0 && levels.length) h.currentLevel = (levels.filter(x => x.height <= preferred).pop() || levels[0]).i;
+      buildQuality(h); v.play().catch(() => tvStatus('', ''));
+    });
     h.on(Hls.Events.ERROR, (_e, d) => {
       if (!d.fatal) return;
       const code = d.response && d.response.code;
@@ -367,7 +386,7 @@ function buildQuality(h) {
   $('#tvQ2').classList.remove('hidden');
   const items = [['-1', 'Авто'], ...h.levels.map((l, i) => [String(i), (l.height ? l.height + 'p' : Math.round((l.bitrate || 0) / 1000) + ' кбит/с')]).sort((a, b) => (parseInt(b[1]) || 0) - (parseInt(a[1]) || 0))];
   menu.innerHTML = items.map(([v, t]) => `<button data-l="${v}" class="${(h.autoLevelEnabled ? '-1' : String(h.currentLevel)) === v ? 'on' : ''}">${esc(t)}</button>`).join('');
-  menu.onclick = (e) => { const b = e.target.closest('[data-l]'); if (!b || !TVS.hls) return; TVS.hls.currentLevel = +b.dataset.l; menu.classList.add('hidden'); buildQuality(TVS.hls); };
+  menu.onclick = (e) => { const b = e.target.closest('[data-l]'); if (!b || !TVS.hls) return; const i = +b.dataset.l; TVS.hls.currentLevel = i; if (i >= 0 && TVS.hls.levels[i]?.height) localStorage.setItem('pl.quality', String(TVS.hls.levels[i].height)); menu.classList.add('hidden'); buildQuality(TVS.hls); };
 }
 function tvPaintVol() {
   const v = $('#tvVideo'); if (!v) return;

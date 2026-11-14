@@ -8,6 +8,7 @@ const zlib = require('zlib');
 const crypto = require('crypto');
 const { Readable } = require('stream');
 const { StringDecoder } = require('string_decoder');
+const isFreeRutubeVideo = require('./rutube-access');
 
 const UA_DEFAULT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
 // Источники встроенных плейлистов: сначала своё зеркало (снимок с ПК, gist dmitrykirsh),
@@ -121,11 +122,56 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
   }
 
   let known = new Map();   // id -> { name, tvg } для всех каналов из включённых списков (нужно для телепрограммы)
+  async function rutubeChannels(force) {
+    const hit = mem.get('rutube:live');
+    if (hit && !force && Date.now() - hit.t < 5 * 60e3) return hit.v;
+    const items = [];
+    for (let page = 1; page <= 10; page++) {
+      const r = await net.fetch(`https://rutube.ru/api/video/topic/1/?limit=100&page=${page}`, { headers: { 'User-Agent': UA_DEFAULT, Accept: 'application/json' }, signal: AbortSignal.timeout(12000) });
+      if (!r.ok) throw new Error('Rutube HTTP ' + r.status);
+      const data = await r.json();
+      items.push(...(Array.isArray(data.results) ? data.results : []));
+      if (!data.has_next) break;
+    }
+    const result = [], seen = new Set();
+    for (const x of items) {
+      if (!/^[a-f0-9]{32}$/i.test(String(x.id || '')) || !x.is_livestream || !x.is_on_air || !isFreeRutubeVideo(x) || x.is_adult || seen.has(x.id)) continue;
+      seen.add(x.id);
+      const title = String(x.title || '').replace(/^прямой эфир\s*(?:телеканала?\s*)?[«"“]?/i, '').replace(/[»"”]\s*$/, '').trim();
+      const name = (title || x.author?.name || 'Прямой эфир').slice(0, 120);
+      const group = x.topics?.find(t => t.name && t.name !== 'Все прямые эфиры')?.name || 'Прямые эфиры';
+      result.push({ id:'rt:' + x.id, name, group, logo:x.author?.avatar_url || x.thumbnail_url || '', tvg:'', sources:[{ kind:'rutube', id:x.id }] });
+    }
+    if (!result.length) throw new Error('Rutube returned no live channels');
+    mem.set('rutube:live', { t:Date.now(), v:result });
+    return result;
+  }
   async function channelsFor(scope, force) {
     const errors = [];
     const get = async (entry, prefix) => { try { return toChannels(await loadList(entry, force), prefix); } catch (e) { errors.push({ list: entry.name, error: e.code || 'NETWORK' }); return []; } };
     let list = [];
-    if (scope === 'stable') list = (await get({ ...BUILTIN.stable, id: 'stable', builtin: true }, '')).map((c) => ({ ...c, stable: true }));
+    if (scope === 'rutube') {
+      try {
+        const bounded = promise => Promise.race([promise, new Promise(resolve => setTimeout(() => resolve([]), 5000))]);
+        const reserveLists = Promise.all([
+          bounded(get({ ...BUILTIN.stable, id:'stable', builtin:true }, '')),
+          bounded(get({ ...BUILTIN.main, id:'main', builtin:true }, ''))
+        ]).then(([stable, main]) => [...stable, ...main]);
+        const [live, reserve] = await Promise.all([rutubeChannels(force), reserveLists]);
+        const groups = new Map();
+        for (const c of reserve) {
+          const k=nrm(c.name); if(!k)continue;
+          if(!groups.has(k))groups.set(k,new Map());
+          const byId=groups.get(k), old=byId.get(c.id);
+          if(!old)byId.set(c.id,{...c,sources:[...c.sources]});
+          else for(const source of c.sources)if(!old.sources.some(x=>x.url===source.url))old.sources.push(source);
+        }
+        const matches=new Map([...groups].map(([key,byId])=>[key,byId.size===1?[...byId.values()][0]:null]));
+        const used = new Set();
+        list = live.map(c => { const r = matches.get(nrm(c.name)); if (!r || used.has(r.id)) return c; used.add(r.id); return { ...c, id:r.id, tvg:r.tvg, sources:[...c.sources, ...r.sources], stable:true }; });
+      } catch (e) { errors.push({ list:'Rutube', error:'NETWORK' }); }
+    }
+    else if (scope === 'stable') list = (await get({ ...BUILTIN.stable, id: 'stable', builtin: true }, '')).map((c) => ({ ...c, stable: true }));
     else if (scope === 'wide') {
       try {
         const items = (await loadList({ ...WIDE, id: 'wide', builtin: true }, force))
@@ -145,7 +191,7 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
   }
   async function refreshKnown() {
     const m = new Map();
-    for (const scope of ['all', 'mine']) { try { for (const c of (await channelsFor(scope)).channels) m.set(c.id, { name: c.name, tvg: c.tvg }); } catch {} }
+    for (const scope of ['all', 'mine', 'rutube']) { try { for (const c of (await channelsFor(scope)).channels) m.set(c.id, { name: c.name, tvg: c.tvg }); } catch {} }
     known = m;
   }
 
@@ -193,7 +239,7 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
   });
   ipcMain.handle('tv:list-remove', (_e, id) => { const s = getStore(); s.tvCustom = customLists().filter((x) => x.id !== id); saveStore(); mem.delete('pl:' + id); refreshKnown(); return { ok: true }; });
   ipcMain.handle('tv:list-toggle', (_e, id, on) => { const e = customLists().find((x) => x.id === id); if (e) { e.enabled = !!on; saveStore(); refreshKnown().then(() => epgIfNeeded(true)); } return { ok: true }; });
-  ipcMain.handle('tv:list-refresh', async () => { for (const k of [...mem.keys()]) if (k.startsWith('pl:')) mem.delete(k); await refreshKnown(); epgIfNeeded(true); return { ok: true }; });
+  ipcMain.handle('tv:list-refresh', async () => { for (const k of [...mem.keys()]) if (k.startsWith('pl:') || k === 'rutube:live') mem.delete(k); await refreshKnown(); epgIfNeeded(true); return { ok: true }; });
 
   /* ---------- телепрограмма ---------- */
   const epgFile = path.join(dir, 'epg.json');
@@ -255,7 +301,7 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
       for (const id of Object.keys(programmes)) programmes[id].sort((x, y) => x[0] - y[0]);
       const alias = {};
       for (const [k, ids] of wantedNames) { const e = nameToEpg.get(k); if (e && programmes[e]) for (const id of ids) alias[id] = e; }
-      epg = { fetchedAt: Date.now(), programmes, alias, total };
+      epg = { fetchedAt: Date.now(), programmes, alias, total, rutubeVersion:mem.has('rutube:live') ? 1 : 0 };
       try { fs.writeFileSync(epgFile, JSON.stringify(epg)); } catch {}
       send('tv:epg-state', { busy: false, fetchedAt: epg.fetchedAt });
       send('tv:epg-updated');
@@ -263,7 +309,7 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
       send('tv:epg-state', { busy: false, error: e.code || e.name || 'ERR', fetchedAt: epg.fetchedAt });
     } finally { epgBusy = false; }
   }
-  function epgIfNeeded(force) { if (force || Date.now() - (epg.fetchedAt || 0) > EPG_TTL) refreshEpg(); }
+  function epgIfNeeded(force) { if (force || (!epg.rutubeVersion && mem.has('rutube:live')) || Date.now() - (epg.fetchedAt || 0) > EPG_TTL) refreshEpg(); }
   ipcMain.handle('tv:epg', () => { epgIfNeeded(false); return { fetchedAt: epg.fetchedAt, busy: epgBusy, programmes: epg.programmes, alias: epg.alias }; });
   ipcMain.handle('tv:epg-refresh', () => { refreshEpg(); return { ok: true }; });
 

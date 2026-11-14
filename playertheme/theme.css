@@ -6,9 +6,9 @@ html,body{background:#000}
 #player,#player *{font-family:'Inter','Segoe UI',system-ui,sans-serif}
 
 /* родные панели управления, большая кнопка Play, меню настроек и серий, контекстное меню */
-[class*="controls_"],[class*="playWrapper_"],[class*="menu_"]{display:none!important}
+html:not([data-luma-native]) [class*="controls_"],html:not([data-luma-native]) [class*="playWrapper_"],html:not([data-luma-native]) [class*="menu_"]{display:none!important}
 /* карточка «следующая серия» остаётся в странице (её таймер управляет сменой серии), но невидима: вместо неё карточка Luma */
-[data-luma-next]{opacity:0!important;pointer-events:none!important}
+html:not([data-luma-native]) [data-luma-next]{opacity:0!important;pointer-events:none!important}
 
 /* загрузка и ошибки */
 [class*="blob_"]{background:var(--l-rose)!important}
@@ -16,5 +16,5 @@ html,body{background:#000}
 [class*="error_"] [class*="caption_"]{font-weight:600}
 
 /* родные субтитры браузера прячем: Luma рисует их сама */
-video::-webkit-media-text-track-container{display:none!important}
-video::cue{color:transparent!important;background:transparent!important;text-shadow:none!important}
+html:not([data-luma-native]) video::-webkit-media-text-track-container{display:none!important}
+html:not([data-luma-native]) video::cue{color:transparent!important;background:transparent!important;text-shadow:none!important}

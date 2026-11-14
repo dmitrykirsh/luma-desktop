@@ -54,13 +54,13 @@ if (!window.__lumaTheme) {
     return thumb;
   };
   /** Субтитры рисует оболочка Luma: родную отрисовку браузера прячет CSS, а режим дорожек не трогаем (плеер сразу сбрасывает субтитры, если ни одна дорожка не показывается). */
-  const subsHooked = new WeakSet();
+  const subsHooked = new WeakSet(); let subOffset = 0;
   const subText = () => {
     const v = video(); if (!v) return '';
     let out = '';
     for (const t of v.textTracks) {
       if (!subsHooked.has(t)) { subsHooked.add(t); t.addEventListener('cuechange', () => post({ sub: subText() })); }
-      if (t.mode === 'showing' && t.activeCues) out = [...t.activeCues].map((q) => q.text).join(String.fromCharCode(10));
+      if (t.mode === 'showing' && t.cues) out = [...t.cues].filter(q => q.startTime <= v.currentTime-subOffset && q.endTime > v.currentTime-subOffset).map(q => q.text).join(String.fromCharCode(10));
     }
     return out;
   };
@@ -73,7 +73,7 @@ if (!window.__lumaTheme) {
       t: v.currentTime, d: isFinite(v.duration) ? v.duration : 0, p: v.paused, e: v.ended, vol: aud && aud.gain ? aud.vol : v.volume, m: aud && aud.gain ? aud.muted : v.muted, buf,
       wait: !v.paused && v.readyState < 3, w: v.videoWidth, h: v.videoHeight,
       q: setting(c, 'quality'), snd: setting(c, 'sound'), cc: setting(c, 'cc'), sp: setting(c, 'speed'), fit: setting(c, 'fit'),
-      nx: nextInfo(), err: errShown(), th: thumbInfo(), sub: subText()
+      nx: nextInfo(), err: errShown(), th: thumbInfo(), subSync: true, sub: subText()
     };
   };
   setInterval(() => { const s = snap(); if (s) post({ st: s }); }, 250);
@@ -84,6 +84,8 @@ if (!window.__lumaTheme) {
     const v = video(), a = window.app;
     try {
       switch (m.c) {
+        case 'subOffset': subOffset=Math.max(-30,Math.min(30,Number(m.v)||0));post({sub:subText()});break;
+        case 'native': document.documentElement.toggleAttribute('data-luma-native', !!m.v); break;
         case 'toggle': if (v) { if (v.paused) { a ? a.play() : v.play(); } else { a ? a.pause() : v.pause(); } } break;
         case 'play': a ? a.play() : v && v.play(); break;
         case 'pause': a ? a.pause() : v && v.pause(); break;

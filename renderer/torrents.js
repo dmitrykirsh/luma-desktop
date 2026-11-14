@@ -4,6 +4,7 @@
 
 /* ---------- состояние сервера ---------- */
 const TR = { st: null, stAt: 0 };
+const torrProgressKey = (titleId, torrentId, fileId) => progKey(titleId) + ':torr:' + (torrentId || 'unknown') + ':' + fileId;
 async function trState(force) {
   if (!force && TR.st && Date.now() - TR.stAt < 5000) return TR.st;
   TR.stAt = Date.now();
@@ -36,17 +37,24 @@ function trBadges(t) {
   else if (has(/\bweb[ -]?(dl|rip)\b/i)) out.push('WEB-DL');
   else if (has(/\b(ts|tc)\b(?![\w])/) || has(/\bhdrip\b/i)) out.push('TS');
   const dub = [];
-  if (has(/(дб|дубляж|dub(bed)?)\b/i)) dub.push('Дубляж');
-  if (has(/\bпм\b/i)) dub.push('ПМ');
-  if (has(/\bло\b/i)) dub.push('ЛО');
-  if (has(/\b(ап|авторский перевод)\b/i)) dub.push('АП');
-  if (has(/\b(любительский|многоголос|двухголос|vo)\b/i)) dub.push('Перевод');
+  if (has(/(?:^|[^\p{L}])(?:дб|дубляж|dub(?:bed)?)(?!\p{L})/iu)) dub.push('Дубляж');
+  if (has(/(?:^|[^\p{L}])пм(?!\p{L})/iu)) dub.push('ПМ');
+  if (has(/(?:^|[^\p{L}])ло(?!\p{L})/iu)) dub.push('ЛО');
+  if (has(/(?:^|[^\p{L}])(?:ап|авторский перевод)(?!\p{L})/iu)) dub.push('АП');
+  if (has(/(?:любительский|многоголос|двухголос|(?:^|[^\p{L}])vo(?!\p{L}))/iu)) dub.push('Перевод');
   return { tech: out.slice(0, 5), dub: dub.slice(0, 4) };
 }
-const trRus = (t) => /rus|рус|дубляж|дуб(\b|\.)\b|пм\b|ло\b|ап\b|перевод|многоголос|двухголос|любитель/i.test(t);
+const trRus = (t) => /rus|рус|дубляж|(?:^|[^\p{L}])(?:дуб|дб|пм|ло|ап)(?!\p{L})|перевод|многоголос|двухголос|любитель/iu.test(t);
 /* раздача относится к сезону N? «сезон 2», «season 2», «S02», «2 сезон» */
 function trSeasonMatch(t, n) {
-  return new RegExp(`(сезон\\s*0?${n}(?!\\d)|season\\s*0?${n}(?!\\d)|[\\s.\\[\\(,]s0?${n}[\\.e\\s\\]\\),])`, 'i').test(' ' + t + ' ');
+  const text=' ' + String(t || '') + ' ', season=Number(n);
+  if (!Number.isInteger(season) || season < 1) return false;
+  if (/(?:все\s+сезоны|all\s+seasons)/i.test(text)) return true;
+  const ranges=[...text.matchAll(/(?:сезон(?:ы|ов|а)?|seasons?)\s*[:№#]?\s*(\d{1,2})\s*[-–—]\s*(\d{1,2})/gi), ...text.matchAll(/\b(\d{1,2})\s*[-–—]\s*(\d{1,2})\s*(?:сезон(?:ы|ов|а)?|seasons?)(?![\p{L}])/giu), ...text.matchAll(/\bs(\d{1,2})\s*[-–—]\s*s?(\d{1,2})\b/gi)];
+  if(ranges.some(m=>season>=Number(m[1]) && season<=Number(m[2])))return true;
+  const lists=[...text.matchAll(/(?:сезон(?:ы|ов|а)?|seasons?)\s*[:№#]?\s*(\d{1,2}(?:\s*[,;+&]\s*\d{1,2})+)/gi)];
+  if(lists.some(m=>m[1].split(/[,;+&]/).some(x=>Number(x.trim())===season)))return true;
+  return new RegExp(`(?:сезон|season)\\s*[:№#]?\\s*0?${season}(?!\\d)|(?:^|[\\s.\\[\\(,])s0?${season}(?=[.e\\s\\]\\),_-]|$)|(?:^|\\s)0?${season}\\s*[- ]?\\s*(?:сезон|season)`, 'i').test(text);
 }
 const trGb = (n) => { n = Number(n) || 0; return n >= 1e9 ? (n / 1e9).toFixed(1).replace(/\.0$/, '') + ' ГБ' : Math.round(n / 1e6) + ' МБ'; };
 const trDate = (s) => { const d = new Date(s || 0); return isNaN(d) ? '' : d.toLocaleDateString('ru', { day: 'numeric', month: 'short', year: 'numeric' }); };
@@ -58,7 +66,7 @@ async function renderTorrents(view, route, alive) {
   let d;
   try { d = await info(route.id); } catch { view.innerHTML = '<div class="empty"><h3>Что-то пошло не так</h3>Проверьте интернет и попробуйте ещё раз</div>'; return; }
   if (!alive()) return;
-  TRS.d = d; TRS.inf = d.info || {}; TRS.list = null; TRS.sort = 'seed'; TRS.rusOnly = false; TRS.token = Date.now();
+  TRS.d = d; TRS.inf = d.info || {}; TRS.list = null; TRS.allResults = null; TRS.sort = 'seed'; TRS.rusOnly = false; TRS.token = Date.now();
   TRS.seasons = (typeof seasonsOf === 'function') ? seasonsOf(d) : [];
   TRS.season = null;
   const st = await trState(true);
@@ -106,16 +114,29 @@ function trPaint(view, st) {
   }
 
   // рабочий экран
+  const recent = state.torrRecent?.[String(d.id)];
+  const saved = recent && state.progress[torrProgressKey(d.id, recent.hash, recent.fileId)];
   view.innerHTML = `${head}
     ${TRS.seasons.length > 1 ? `<div class="tr-seas">${`<button class="pill ${!TRS.season ? 'on' : ''}" data-seas="">Все сезоны</button>` + TRS.seasons.map((s) => `<button class="pill ${String(TRS.season) === String(s.season) ? 'on' : ''}" data-seas="${esc(String(s.season))}">Сезон ${esc(String(s.season))}</button>`).join('')}</div>` : ''}
     <div class="tr-bar">
+      ${recent && /^[a-f0-9]{40}$/i.test(recent.hash || '') ? `<button class="pill on" id="trResume">Продолжить торрент${saved?.t >= 10 ? ' · ' + fmtTime(saved.t) : ''}</button>` : ''}
       <button class="pill" id="trFind">Искать раздачи</button>
       <button class="pill" id="trSort">${{ seed: 'По сидам', size: 'По размеру', date: 'По дате' }[TRS.sort]}</button>
       <button class="pill ${TRS.rusOnly ? 'on' : ''}" id="trRus">${TRS.rusOnly ? 'С русским звуком' : 'Любой звук'}</button>
     </div>
     <div id="trList"><div class="empty"><div class="spin" style="margin:0 auto"></div></div></div>`;
   $$('.tr-seas .pill', view).forEach((b) => (b.onclick = () => { TRS.season = b.dataset.seas ? +b.dataset.seas : null; trPaint(view, { installed: true, running: true }); }));
-  $('#trFind').onclick = () => trLoad(view);
+  $('#trFind').onclick = () => { TRS.allResults = null; trLoad(view); };
+  if ($('#trResume')) $('#trResume').onclick = async () => {
+    const b=$('#trResume'); b.disabled=true;
+    try {
+      const data=await trApi('/torrents','POST',JSON.stringify({action:'get',hash:recent.hash}));
+      const files=trFilesOf(data), file=files.find(x=>String(x.id)===String(recent.fileId));
+      if(!file) { toast('Сохранённый файл не найден в TorrServe'); return; }
+      trPlayFile({hash:recent.hash,name:data.title || d.name,files,magnet:'magnet:?xt=urn:btih:'+recent.hash},file);
+    } catch { toast('Не удалось открыть сохранённую раздачу'); }
+    finally { if(b.isConnected)b.disabled=false; }
+  };
   $('#trSort').onclick = () => { TRS.sort = { seed: 'size', size: 'date', date: 'seed' }[TRS.sort]; $('#trSort').textContent = { seed: 'По сидам', size: 'По размеру', date: 'По дате' }[TRS.sort]; trPaintList(view); };
   $('#trRus').onclick = () => { TRS.rusOnly = !TRS.rusOnly; $('#trRus').classList.toggle('on', TRS.rusOnly); $('#trRus').textContent = TRS.rusOnly ? 'С русским звуком' : 'Любой звук'; trPaintList(view); };
   trLoad(view);
@@ -136,14 +157,10 @@ async function trDoInstall(view) {
 async function trLoad(view) {
   const t = TRS.token, box = $('#trList'); if (!box) return;
   box.innerHTML = '<div class="empty"><div class="spin" style="margin:0 auto"></div></div>';
+  if (TRS.allResults) { TRS.list = TRS.allResults; trPaintList(view); return; }
   const d = TRS.d, inf = TRS.inf;
   const y = d.year || inf.year || '';
   const qs = [...new Set([`${d.name} ${y}`.trim(), `${d.origin_name || ''} ${y}`.trim(), d.name].filter((x) => x.trim().length > 1))];
-  if (TRS.season) {
-    // выбран конкретный сезон: ищем раздачи именно этого сезона (как в NUM)
-    qs.unshift(`${d.name} ${TRS.season} сезон`);
-    if (d.origin_name) qs.unshift(`${d.origin_name} season ${TRS.season}`);
-  }
   let list = null;
   for (const q of qs) {
     try {
@@ -153,21 +170,22 @@ async function trLoad(view) {
     } catch {}
   }
   if (TRS.token !== t) return;
-  TRS.list = list || [];
+  TRS.allResults = list || []; TRS.list = TRS.allResults;
   trPaintList(view);
 }
 function trPaintList(view) {
   const box = $('#trList'); if (!box || !TRS.list) return;
   let list = TRS.list.slice();
-  if (TRS.rusOnly) { const f = list.filter((x) => trRus(x.Title)); if (f.length) list = f; }
+  if (TRS.rusOnly) list = list.filter((x) => trRus(x.Title));
   if (TRS.season) {
-    // показываем раздачи выбранного сезона; если таких нет — показываем всё
-    const f = list.filter((x) => trSeasonMatch(x.Title, TRS.season));
-    if (f.length) list = f;
+    list = list.filter((x) => trSeasonMatch(x.Title, TRS.season));
   }
   const cmp = { seed: (a, b) => (b.Seeders || 0) - (a.Seeders || 0), size: (a, b) => (b.Size || 0) - (a.Size || 0), date: (a, b) => new Date(b.PublishDate || 0) - new Date(a.PublishDate || 0) };
   list.sort(cmp[TRS.sort] || cmp.seed);
-  if (!list.length) { box.innerHTML = '<div class="empty"><h3>Раздач не нашлось</h3>Попробуйте другой сезон или поиск по оригинальному названию</div>'; return; }
+  if (!list.length) {
+    const hint = TRS.season || TRS.rusOnly ? 'Попробуйте другой сезон или отключите фильтр русского звука.' : 'Попробуйте обновить поиск или изменить название.';
+    box.innerHTML = `<div class="empty"><h3>Раздач не нашлось</h3>${hint}</div>`; return;
+  }
   box.innerHTML = `<div class="hint" style="margin:4px 0 10px">Раздач: ${list.length}</div>` + list.map((x, i) => {
     const b = trBadges(x.Title), seed = x.Seeders || 0, peers = x.Peers || 0;
     return `<button class="tr-row" data-i="${i}">
@@ -213,7 +231,7 @@ function trFilesOf(entry) {
     try {
       const d = JSON.parse(entry.data || '{}');
       const inner = d.TorrServer || d;
-      all = JSON.parse(inner.Files || '[]');
+      all = Array.isArray(inner.Files) ? inner.Files : JSON.parse(inner.Files || '[]');
     } catch {}
   }
   all = Array.isArray(all) ? all : [];
@@ -298,8 +316,13 @@ function trPlayFile(info, f) {
     trPlayFile(window.__torrCtx.info, full);
     return true;
   };
+  if (/^[a-f0-9]{40}$/i.test(String(info.hash || ''))) {
+    state.torrRecent ||= {};
+    state.torrRecent[String(TRS.d.id)] = { hash:info.hash, fileId:f.id };
+    persist('torrRecent');
+  }
   toast('Открываем торрент…');
-  playTorr(TRS.d, fname, url, f.id);
+  playTorr(TRS.d, fname, url, f.id, info.hash);
 }
 
 /* ---------- настройки: раздел «Торренты» ---------- */

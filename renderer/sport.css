@@ -1,0 +1,20 @@
+.sport-head{display:flex;align-items:center;justify-content:space-between;gap:20px}
+.sport-head p{margin:6px 0 0;color:var(--muted);font-size:14px}
+.sport-filters{padding-bottom:8px}
+.sport-hint{padding:0 32px}
+.sport-section{margin-bottom:20px}
+.sport-rail{display:flex;gap:16px;overflow-x:auto;padding:10px 32px 18px;scrollbar-width:thin;scrollbar-color:#494b57 transparent}
+.sport-rail::-webkit-scrollbar{height:6px}
+.sport-rail::-webkit-scrollbar-track{background:transparent}
+.sport-rail::-webkit-scrollbar-thumb{background:#494b57;border-radius:8px}
+.sport-card{flex:0 0 260px;min-width:0;text-align:left;color:var(--text);background:transparent;cursor:pointer}
+.sport-image{aspect-ratio:16/9;position:relative;border-radius:16px;overflow:hidden;background:var(--surface-2);border:1px solid var(--line)}
+.sport-image img{width:100%;height:100%;object-fit:cover;transition:transform .3s var(--ease)}
+.sport-card:hover img{transform:scale(1.04)}
+.sport-card>b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.35;margin-top:10px;font-size:14px}
+.sport-card small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted);margin-top:5px}
+.sport-badge{position:absolute;left:9px;top:9px;padding:4px 7px;border-radius:6px;background:rgba(12,13,18,.84);font-size:10px;font-weight:700}
+.sport-badge.live{background:var(--primary);color:white}
+.sport-play{position:absolute;right:10px;bottom:10px;width:36px;height:36px;display:grid;place-items:center;border-radius:50%;background:rgba(12,13,18,.8);opacity:0;transition:opacity .2s}
+.sport-play svg{width:16px;height:16px;fill:currentColor;stroke:currentColor}
+.sport-card:hover .sport-play,.sport-card:focus-visible .sport-play{opacity:1}

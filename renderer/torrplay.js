@@ -7,7 +7,9 @@
 const TorrPlay = (() => {
   let v = null, url = '';
   let nextShown = false, nextCancel = false;
-  let tracks = null, curAudio = null, probeDur = 0, fxPos = 0;
+  let tracks = null, curAudio = null, originalAudio = null, probeDur = 0, fxPos = 0;
+  let generation = 0;
+  let subtitles = [], subCurrent = 'Откл', subCues = [], subAbort = null, subtitleOffset = 0;
   let fx = null;   // {ms, sb, reader, buf, segStart, url, startAt, restarting}
 
   const hasNext = () => { const c = window.__torrCtx; return !!(c && c.idx >= 0 && c.idx < c.files.length - 1); };
@@ -24,11 +26,14 @@ const TorrPlay = (() => {
     const ss = fx ? (fx.ss || 0) : 0;  // fx-поток 0-based: сдвигаем шкалу в абсолютную
     PL.feed({
       t: ss + (v.currentTime || 0),
-      d: v.duration && isFinite(v.duration) ? v.duration + ss : 0,
-      p: v.paused ? 0 : 1,
+      d: probeDur || (v.duration && isFinite(v.duration) ? v.duration + ss : 0),
+      p: v.paused,
       vol: v.volume, m: v.muted,
       buf: v.buffered.length ? ss + v.buffered.end(v.buffered.length - 1) : 0,
-      snd: tracks && tracks.length > 1 ? { v: curAudio, ls: tracks.map((t) => t.name) } : undefined
+      sp: { v:v.playbackRate, ls:[0.5, 0.75, 1, 1.25, 1.5, 2] },
+      snd: tracks && tracks.length > 1 ? { v: curAudio, ls: tracks.map((t) => t.name) } : undefined,
+      cc: subtitles.length ? { v:subCurrent, ls:['Откл', ...subtitles.map(t => t.name)] } : undefined,
+      subSync: true, sub: subCues.filter(c => c.start <= ss + v.currentTime - subtitleOffset && c.end > ss + v.currentTime - subtitleOffset).map(c => c.text).join('\n')
     });
     // карточка «следующая серия» за 40 секунд до конца
     const d = v.duration && isFinite(v.duration) ? v.duration : 0;
@@ -153,7 +158,7 @@ const TorrPlay = (() => {
             if (!codecs) throw new Error('no codec');
             f.sb = ms.addSourceBuffer('video/mp4; codecs="' + codecs + '"');
             f.sb.mode = 'segments';
-            if (probeDur > 0) { try { ms.duration = probeDur + 10; } catch {} }
+            if (probeDur > 0) { try { ms.duration = Math.max(0, probeDur - f.ss) + 1; } catch {} }
             f.sb.appendBuffer(init);
             await sbUpdate(f.sb);
             const rest = flat.slice(init.length);
@@ -168,8 +173,10 @@ const TorrPlay = (() => {
         }
       } catch (e) {
         if (fx !== f) return;  // ошибка от старого, вытесненного fxOpen — нас не касается
+        try { (window.__tlog = window.__tlog || []).push('audio switch: ' + (e?.message || 'unknown error')); } catch {}
         fxClose();
         v.src = url;
+        curAudio = originalAudio; feed();
         try { v.currentTime = fxPos || 0; } catch {}
         try { v.play(); } catch {}
         toast('Выбранная дорожка в этом браузере не играет — вернули прежнюю озвучку');
@@ -275,10 +282,11 @@ const TorrPlay = (() => {
     });
     v.addEventListener('error', () => {
       if (!v || !v.error) return;
+      try { (window.__tlog = window.__tlog || []).push('video error: ' + v.error.code + ' / ' + (fx ? fx.ms.readyState : 'direct') + ' / ' + String(v.error.message || '').slice(0,400)); } catch {}
       // MSE-режим: реальная ошибка MediaSource переводит его в 'closed';
       // транзиентные error при смене src игнорируем, пока источник жив
-      if (fx && fx.ms.readyState === 'open') return;
-      if (fx) { fxClose(); v.src = url; try { v.currentTime = fxPos || 0; } catch {} v.play().catch(() => {}); toast('Пересобранный поток не открылся — вернули прежнюю озвучку'); return; }
+      if (fx && (!fx.meta || fx.ms.readyState === 'open')) return;
+      if (fx) { fxClose(); v.src = url; curAudio = originalAudio; feed(); try { v.currentTime = fxPos || 0; } catch {} v.play().catch(() => {}); toast('Пересобранный поток не открылся — вернули исходную озвучку'); return; }
       // Chromium не тянет некоторые контейнеры (MKV/AVI/WMV): отдаём поток внешнему плееру (VLC), если он есть
       if (v.error.code === 3 || v.error.code === 4) {
         toast('Этот контейнер встроенный плеер не играет — открываем во внешнем (VLC)');
@@ -289,20 +297,82 @@ const TorrPlay = (() => {
   }
 
   /* выбор озвучки: список дорожек — ffprobe, пересбор — ffmpeg; играем через MSE */
+  const AUDIO_OK = { aac: 1, opus: 1, flac: 1, mp3: 1 };  // то, что умеет декодировать Chromium
+  function resetSubtitles() {
+    if (subAbort) subAbort.abort(); subAbort = null;
+    subtitles = []; subCurrent = 'Откл'; subCues = []; subtitleOffset = 0;
+  }
+  function parseVtt(text) {
+    const stamp = s => { const a=s.replace(',', '.').split(':').map(Number); return a.reduce((n,x)=>n*60+x,0); };
+    return String(text).replace(/\r/g,'').split(/\n\s*\n/).map(block => {
+      const lines=block.split('\n'), i=lines.findIndex(line => line.includes('-->'));
+      if(i<0)return null;
+      const m=lines[i].match(/(\d{2}:)?\d{2}:\d{2}[.,]\d{3}\s*-->\s*((?:\d{2}:)?\d{2}:\d{2}[.,]\d{3})/);
+      if(!m)return null;
+      const start=lines[i].split('-->')[0].trim();
+      return {start:stamp(start),end:stamp(m[2]),text:lines.slice(i+1).join('\n')};
+    }).filter(Boolean);
+  }
+  async function switchSubtitle(name) {
+    if (subAbort) subAbort.abort(); subAbort = null;
+    if (name === 'Откл') { subCurrent = name; subCues = []; feed(); return; }
+    const sub = subtitles.find(x => x.name === name);
+    if (!sub) return;
+    if (!sub.supported) { toast('Графические субтитры пока не поддерживаются'); feed(); return; }
+    const ctl = new AbortController(), source = url, current = generation;
+    subAbort = ctl; subCurrent = name; subCues = []; feed();
+    toast('Загружаем субтитры…');
+    try {
+      const target='http://127.0.0.1:8931/sub?src='+encodeURIComponent(source)+'&s='+sub.i;
+      const response=await fetch(target,{signal:ctl.signal});
+      if(!response.ok)throw new Error('subtitles');
+      if(!response.body)throw new Error('empty subtitles');
+      const reader=response.body.getReader(), decoder=new TextDecoder();
+      let pending='', notified=false;
+      for (;;) {
+        const {done,value}=await reader.read();
+        if(ctl.signal.aborted || generation!==current || source!==url)return;
+        pending += (value ? decoder.decode(value,{stream:!done}) : decoder.decode()).replace(/\r/g,'');
+        if(pending.length>2*1024*1024)throw new Error('subtitle block too large');
+        const blocks=pending.split(/\n\s*\n/); pending=done?'':blocks.pop();
+        if(done && pending)blocks.push(pending);
+        const cues=parseVtt(blocks.join('\n\n'));
+        if(cues.length){subCues.push(...cues);feed();if(!notified){notified=true;toast('Субтитры включены');}}
+        if(done)break;
+      }
+      if(!notified)throw new Error('empty subtitles');
+    } catch(e) { if(ctl.signal.aborted || generation!==current)return; subCurrent='Откл'; subCues=[]; feed(); toast('Не удалось загрузить субтитры'); }
+    finally { if(subAbort===ctl)subAbort=null; }
+  }
   async function probe() {
-    tracks = null; curAudio = null; probeDur = 0;
+    tracks = null; curAudio = null; originalAudio = null; probeDur = 0;
+    const current = generation, source = url;
     let r;
-    try { r = await window.lift.torrProbe(url); } catch { return; }
-    if (!r || !r.ok || !r.audio || r.audio.length < 2) return;
-    tracks = r.audio;
+    try { r = await window.lift.torrProbe(source); } catch { r = null; }
+    if (current !== generation || source !== url) return;
+    if (!r || !r.ok) { toast('Не удалось определить аудиодорожки торрента'); return; }
+    subtitles = Array.isArray(r.subtitles) ? r.subtitles : [];
+    const list = r.audio || [];
+    if (!list.length) { feed(); return; }
     probeDur = r.dur || 0;
-    curAudio = r.cur || r.audio[0].name;
+    curAudio = r.cur || list[0].name;
+    originalAudio = curAudio;
+    const cur = list.find((x) => x.name === curAudio) || list[0];
+    try { (window.__tlog = window.__tlog || []).push('probe cur=' + (cur && cur.codec) + ' ok=' + !!AUDIO_OK[cur && cur.codec]); } catch {}
+    if (cur && !AUDIO_OK[cur.codec]) {
+      /* браузер не играет эту дорожку (AC-3/DTS/...) — прямой поток даст видео без звука.
+         Сразу пересобираем в AAC через локальный ffmpeg (MSE) с текущей позиции. */
+      const pos = v.currentTime || 0;
+      const fxUrl = 'http://127.0.0.1:8931/fx?src=' + encodeURIComponent(url) + '&a=' + encodeURIComponent(cur.i);
+      fxOpen(fxUrl + '&ss=' + pos.toFixed(1), pos, fxUrl);
+    }
+    if (list.length >= 2) tracks = list;
     feed();
   }
   function switchAudio(name) {
     if (!tracks || name === curAudio) return;
     const t = tracks.find((x) => x.name === name); if (!t) return;
-    const pos = v.currentTime || 0;
+    const pos = (fx?.ss || 0) + (v.currentTime || 0);
     fxPos = pos;
     curAudio = name;
     const fxUrl = 'http://127.0.0.1:8931/fx?src=' + encodeURIComponent(url) + '&a=' + encodeURIComponent(t.i);
@@ -312,10 +382,12 @@ const TorrPlay = (() => {
 
   return {
     open(streamUrl, resume) {
+      generation++;
+      resetSubtitles();
       const vid = ensure();
       url = streamUrl;
       nextShown = false; nextCancel = false;
-      tracks = null; curAudio = null; probeDur = 0;
+      tracks = null; curAudio = null; originalAudio = null; probeDur = 0;
       fxClose();
       vid.src = streamUrl;
       if (resume > 0) { try { vid.currentTime = resume; } catch {} }
@@ -324,16 +396,21 @@ const TorrPlay = (() => {
       probe();
     },
     close() {
+      generation++;
+      resetSubtitles();
       fxClose();
       if (v) { v.pause(); v.removeAttribute('src'); try { v.load(); } catch {} }
       const f = $('#plFrame'); if (f) f.style.visibility = '';
-      tracks = null; curAudio = null; probeDur = 0;
+      tracks = null; curAudio = null; originalAudio = null; probeDur = 0;
       window.__torrCtx = null;
       PL.next(null);
     },
     cmd(c, m) {
       if (!v) return;
+      if (c === 'set' && m && m.k === 'subOffset') { subtitleOffset = Math.max(-30, Math.min(30, Number(m.v)||0)); feed(); return; }
       if (c === 'set' && m && m.k === 'sound') { switchAudio(m.v); return; }
+      if (c === 'set' && m && m.k === 'cc') { switchSubtitle(m.v); return; }
+      if (c === 'set' && m && m.k === 'speed') { v.playbackRate = Math.max(0.5, Math.min(2, Number(m.v) || 1)); feed(); return; }
       if (c === 'toggle') { v.paused ? v.play().catch(() => {}) : v.pause(); }
       else if (c === 'play') v.play().catch(() => {});
       else if (c === 'pause') v.pause();
