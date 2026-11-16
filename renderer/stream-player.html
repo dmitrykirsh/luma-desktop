@@ -2,13 +2,17 @@
   (() => {
     const v = document.querySelector('#v');
     const params = new URLSearchParams(location.hash.slice(1));
-    const src = params.get('src');
+    let src = params.get('src');
+    try {
+      const streams=JSON.parse(params.get('srcs')||'[]').filter(x=>Number.isInteger(x.quality)&&/^https:\/\/(?:[a-z0-9-]+\.)*solodcdn\.com\//i.test(x.url));
+      if(streams.length>1){const lines=['#EXTM3U','#EXT-X-VERSION:3'];for(const x of streams){const h=x.quality,w=Math.round(h*16/9/2)*2;lines.push(`#EXT-X-STREAM-INF:BANDWIDTH=${h*h*4},RESOLUTION=${w}x${h}`,x.url);}src=URL.createObjectURL(new Blob([lines.join('\n')+'\n'],{type:'application/vnd.apple.mpegurl'}));}
+    } catch {}
     const initialAudio = Math.max(0, Number.parseInt(params.get('audio'), 10) || 0);
     const initialVoice = params.get('voice') || '';
     const post = (m) => parent.postMessage(m, '*');
     if (!src) return;
     let h = null, subOffset = 0;
-    if (window.Hls && Hls.isSupported() && /\.m3u8(?:[?#]|$)/i.test(src)) {
+    if (window.Hls && Hls.isSupported() && (/\.m3u8(?:[?#]|$)/i.test(src) || src.startsWith('blob:'))) {
       h = new Hls(); h.loadSource(src); h.attachMedia(v);
       let initialAudioSelected = false;
       const selectInitialAudio = () => {

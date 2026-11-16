@@ -1,8 +1,8 @@
 'use strict';
 /* ================= Телевизор ================= */
 const TVS = {
-  scope: 'rutube', country: '', cat: 'Все', q: '', channels: [], byId: new Map(), errors: [], lists: null,
-  epg: {}, alias: {}, epgAt: 0, epgBusy: false, epgErr: '',
+  scope: 'rutube', country: '', cat: 'Все', q: '', channels: [], byId: new Map(), errors: [], lists: null, guide:localStorage.getItem('luma.tv.view')!=='cards',
+  epg: {}, alias: {}, worldEpg:{}, epgAt: 0, epgBusy: false, epgErr: '', guideOffset:0,
   hls: null, cur: null, srcIdx: 0, timers: {}, shown: 0, tick: null
 };
 const TV_SCOPES = [['rutube', 'Rutube'], ['stable', 'Стабильные'], ['all', 'Все каналы'], ['wide', 'По странам'], ['mine', 'Мои плейлисты']];
@@ -37,8 +37,13 @@ const fmtWatch = (sec) => (sec >= 3600 ? Math.floor(sec / 3600) + ' ч ' + Math.
 
 /* ---------- телепрограмма ---------- */
 const tvEpgId = (ch) => (ch.tvg && TVS.epg[ch.tvg] ? ch.tvg : TVS.alias[ch.id] || '');
+const tvEpgRows=ch=>{const link=state.tvEpgLinks?.[ch.id];if(link?.id)return TVS.epg[link.tvg]||TVS.epg[TVS.alias[link.id]]||TVS.worldEpg[link.id]||[];const primary=TVS.epg[tvEpgId(ch)]||[],world=TVS.worldEpg[ch.id]||[],now=Date.now();return primary.some(p=>p[0]<=now&&p[1]>now)?primary:world.some(p=>p[0]<=now&&p[1]>now)?world:primary.some(p=>p[1]>now)?primary:world.length?world:primary;};
+const tvGuideBegin=()=>Math.floor(Date.now()/1800000)*1800000+TVS.guideOffset*1800000;
+function tvGuideRefresh(){if(currentRoute?.name!=='tv'||!TVS.guide||currentRoute.ch)return;const begin=tvGuideBegin();const clock=document.querySelector('.tv-guide-clock');if(clock)clock.textContent=hm(Date.now());document.querySelectorAll('.tv-guide-times time').forEach((el,i)=>el.textContent=hm(begin+i*1800000));document.querySelectorAll('.tv-guide-row').forEach(row=>{const c=TVS.byId.get(row.querySelector('[data-guide-ch]')?.dataset.guideCh),line=row.querySelector('.tv-guide-line');if(!c||!line||line.contains(document.activeElement))return;const tmp=document.createElement('div');tmp.innerHTML=tvGuideRow(c);line.innerHTML=tmp.querySelector('.tv-guide-line')?.innerHTML||'';});const first=TVS.byId.get(document.activeElement?.closest('[data-guide-ch]')?.dataset.guideCh)||tvFiltered()[0];if(first)tvGuideFeature(first,document.activeElement?.dataset?.guideStart);}
+async function tvWorldEpgLoad(countries){await Promise.all(countries.map(async country=>{const code=String(country||'').toLowerCase()==='uk'?'gb':String(country||'').toLowerCase();if(!['us','gb','ca','au','br','de','es','fr','it','nl','pl','pt','rs','tr','ua'].includes(code))return;try{const r=await window.lift.tvWorldEpg(code);Object.assign(TVS.worldEpg,r.programmes||{});if(currentRoute?.name==='tv'){tvTick(true);tvGuideRefresh();}}catch{}}));}
+
 function tvNowNext(ch, at = Date.now()) {
-  const list = TVS.epg[tvEpgId(ch)] || [];
+  const list = tvEpgRows(ch);
   const i = list.findIndex((p) => p[0] <= at && p[1] > at);
   if (i < 0) return { now: null, next: list.find((p) => p[0] > at) || null, pct: 0 };
   const p = list[i];
@@ -53,7 +58,7 @@ async function tvLoadEpg() {
   const e = await window.lift.tvEpg();
   TVS.epg = e.programmes || {}; TVS.alias = e.alias || {}; TVS.epgAt = e.fetchedAt || 0; TVS.epgBusy = !!e.busy;
 }
-window.lift.onTvEpg(async () => { await tvLoadEpg(); TVS.epgErr = ''; if (currentRoute?.name === 'tv') tvTick(true); });
+window.lift.onTvEpg(async () => { await tvLoadEpg(); TVS.epgErr = ''; if (currentRoute?.name === 'tv') { tvTick(true); tvGuideRefresh(); } else if(currentRoute?.name === 'sport') window.sportUpdateChannelEpg?.(); });
 window.lift.onTvEpgState((s) => { TVS.epgBusy = !!s.busy; if (s.fetchedAt) TVS.epgAt = s.fetchedAt; TVS.epgErr = s.error || ''; const el = $('#tvEpgChip'); if (el) { el.textContent = tvEpgStatus(); el.classList.toggle('busy', TVS.epgBusy); } });
 
 /* ---------- каналы: фильтры ---------- */
@@ -89,19 +94,26 @@ function tvCard(c, i = 0) {
     <div class="tv-meta"><b>${esc(c.name)}</b><span class="now">${now ? esc(now[2]) : esc(c.group)}</span><div class="bar"><i style="width:${pct}%"></i></div></div>
   </div>`;
 }
+function tvGuideRow(c){const now=Date.now(),begin=tvGuideBegin(),end=begin+3*3600000,rows=tvEpgRows(c).filter(p=>p[1]>begin&&p[0]<end);return `<div class="tv-guide-row"><button class="tv-guide-channel" data-guide-ch="${esc(c.id)}">${c.logo?`<img loading="lazy" src="${esc(c.logo)}" alt="">`:`<span>${esc((c.name||'?')[0])}</span>`}<b>${esc(c.name)}</b></button><div class="tv-guide-line">${rows.length?rows.map(p=>{const left=Math.max(0,(p[0]-begin)/(end-begin)*100),right=Math.min(100,(p[1]-begin)/(end-begin)*100);return `<button class="tv-guide-show ${p[0]<=now&&p[1]>now?'on':''}" data-guide-ch="${esc(c.id)}" data-guide-start="${p[0]}" style="left:${left}%;width:${Math.max(0,right-left)}%" title="${esc(hm(p[0])+' · '+p[2])}"><span>${esc(p[2])}</span></button>`}).join(''):'<span class="tv-guide-empty">Нет данных программы</span>'}</div></div>`;}
+function tvGuideFeature(c,start){if(TVS.guideSelected!==c.id)TVS.guideSelectedStart=null;TVS.guideSelected=c.id;if(start!=null)TVS.guideSelectedStart=Number(start);const link=state.tvEpgLinks?.[c.id];if(link?.id&&link.cc&&!TVS.worldEpg[link.id]&&!TVS.worldLinkAttempted?.has(link.id)){(TVS.worldLinkAttempted||=new Set()).add(link.id);tvWorldEpgLoad([link.cc]);}const map=$('#tvGuideMap');if(map)map.textContent=state.tvEpgLinks?.[c.id]?.id?'Программа: '+state.tvEpgLinks[c.id].name:'Привязать программу';const title=$('#tvGuideTitle'),sub=$('#tvGuideSubtitle'),logo=$('#tvGuideFeatureLogo');if(!c||!title||!sub)return;const now=tvNowNext(c),chosen=TVS.guideSelectedStart!=null?tvEpgRows(c).find(p=>p[0]===TVS.guideSelectedStart):null,show=chosen||now.now;TVS.guideProgram=show;const reminder=$('#tvGuideReminder');if(reminder){const valid=!!show&&Number(show[0])>Date.now();reminder.disabled=!valid;reminder.textContent=valid&&tvProgramReminderOn(c,show)?'Напоминание включено':'Напомнить за 15 мин';reminder.setAttribute('aria-pressed',String(valid&&tvProgramReminderOn(c,show)));}const label=document.querySelector('.tv-guide-lead > span');if(label)label.textContent=show&&show[0]<=Date.now()&&show[1]>Date.now()?'СЕЙЧАС В ПРОГРАММЕ':'ТЕЛЕВИЗОР · ВЫБРАННАЯ ПЕРЕДАЧА';title.textContent=show?show[2]:c.name;sub.textContent=show?c.name+' · '+hm(show[0])+'–'+hm(show[1]):'Программа канала пока недоступна';if(logo){logo.innerHTML=c.logo?'<img alt="">':'<b></b>';const img=logo.querySelector('img');if(img){img.onerror=()=>{const fallback=document.createElement('b');fallback.textContent=(c.name||'?')[0];img.replaceWith(fallback);};img.src=c.logo;}else logo.querySelector('b').textContent=(c.name||'?')[0];}}
+function tvOpenEpgLink(ch){if(!ch)return;const previous=document.activeElement,box=document.createElement('div');box.className='sport-match-overlay';box.innerHTML=`<div class="sport-match-dialog epg-link-dialog"><h2>Программа для ${esc(ch.name)}</h2><p class="hint">Выберите канал, чью телепрограмму показывать. Доступны каналы загруженного списка.</p><input class="epg-link-search" placeholder="Найти канал" aria-label="Найти канал"><div class="epg-link-list"></div><div class="epg-link-actions"><button class="btn ghost" data-reset>Автоматически</button><button class="btn ghost" data-close>Закрыть</button></div></div>`;document.body.append(box);const close=()=>{document.removeEventListener('keydown',key,true);box.remove();previous?.focus({preventScroll:true});},key=e=>{if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();close();}};document.addEventListener('keydown',key,true);box.querySelector('[data-close]').onclick=close;box.onclick=e=>{if(e.target===box)close()};const set=source=>{state.tvEpgLinks[ch.id]={id:source?.id||'',tvg:source?.tvg||'',name:source?.name||'',cc:source?.cc||'',ts:Date.now()};persist('tvEpgLinks');close();tvGuideRefresh();tvGuideFeature(ch);};box.querySelector('[data-reset]').onclick=()=>set(null);const input=box.querySelector('input'),list=box.querySelector('.epg-link-list'),paint=()=>{const q=input.value.trim().toLocaleLowerCase('ru-RU');list.innerHTML='';const candidates=TVS.channels.filter(c=>c.id!==ch.id&&(!q||c.name.toLocaleLowerCase('ru-RU').includes(q))&&(TVS.epg[tvEpgId(c)]?.length||TVS.worldEpg[c.id]?.length)).slice(0,120);for(const c of candidates){const b=document.createElement('button');b.className='btn ghost';b.textContent=c.name;b.onclick=()=>set(c);list.append(b)}if(!candidates.length)list.textContent='Подходящих каналов с программой нет.'};input.oninput=paint;paint();input.focus();}
+function tvGuideHTML(list){const begin=tvGuideBegin();return `<div class="tv-guide-head"><div class="tv-guide-feature"><div class="tv-guide-feature-logo" id="tvGuideFeatureLogo"></div><div class="tv-guide-lead"><span>ТЕЛЕВИЗОР · СЕЙЧАС В ЭФИРЕ</span><h2 id="tvGuideTitle">Телепрограмма</h2><p id="tvGuideSubtitle">Выберите канал, чтобы начать просмотр</p></div></div><div class="tv-guide-actions"><button class="pill" id="tvGuideReminder" disabled>Напомнить за 15 мин</button><button class="pill" id="tvGuideMap">Привязать программу</button><button class="pill" data-guide-shift="-6" aria-label="Ранее">‹ Ранее</button><button class="pill" data-guide-shift="now">Сейчас</button><button class="pill" data-guide-shift="6" aria-label="Позже">Позже ›</button><span class="tv-guide-clock">${esc(hm(Date.now()))}</span></div></div><div class="tv-guide"><div class="tv-guide-times"><span>Канал</span><div>${Array.from({length:6},(_,i)=>`<time>${esc(hm(begin+i*1800000))}</time>`).join('')}</div></div><div id="tvGrid">${list.map(tvGuideRow).join('')}</div></div><div id="tvMore"></div>`;}
 function tvWireImgs(root) {
-  $$('.tv-logo img', root).forEach((img) => { if (img.dataset.w) return; img.dataset.w = 1; img.onerror = () => img.remove(); });
+  $$('.tv-logo img', root).forEach((img) => { if (img.dataset.w) return; img.dataset.w = 1; const loaded=()=>img.parentElement?.classList.add('has-logo'); img.onload=loaded; img.onerror=()=>{img.parentElement?.classList.remove('has-logo');img.remove();}; if(img.complete){if(img.naturalWidth)loaded();else img.onerror();} });
+  $$('.tv-guide-channel img', root).forEach((img) => { if(img.dataset.w)return;img.dataset.w='1';img.onerror=()=>{const fallback=document.createElement('span');fallback.textContent=img.parentElement?.querySelector('b')?.textContent?.trim()[0]||'?';img.replaceWith(fallback);};if(img.complete&&!img.naturalWidth)img.onerror(); });
 }
 
 /* ================= страница ================= */
 async function renderTv(view, route, alive) {
+  TVS.worldLinkAttempted = new Set();
   view.innerHTML = '<div class="empty"><div class="spin" style="margin:0 auto"></div><p style="margin-top:14px">Загружаем каналы…</p></div>';
   const lists = await window.lift.tvLists();
   if (!alive()) return;
   if (!state.tvPrefs.rutubeDefault) { state.tvPrefs.scope = 'rutube'; state.tvPrefs.rutubeDefault = true; persist('tvPrefs'); }
   TVS.scope = route.scope || state.tvPrefs.scope || 'rutube';
   if (TVS.scope === 'world') TVS.scope = 'stable';   // вкладку «Мир» убрали: мировые каналы теперь в «По странам»
-  TVS.country = state.tvPrefs.country || '';
+  TVS.country = route.category ? '' : (state.tvPrefs.country || '');
+  if(route.category) TVS.cat=route.category;
   // сохранённый раздел «Мои плейлисты» без единого включённого плейлиста не показываем пустым
   if (TVS.scope === 'mine' && !route.scope && !lists.custom.some((c) => c.enabled)) TVS.scope = 'stable';
   const [chs] = await Promise.all([window.lift.tvChannels(TVS.scope), tvLoadEpg().catch(() => {})]);
@@ -109,6 +121,7 @@ async function renderTv(view, route, alive) {
   TVS.lists = lists; TVS.errors = (chs && chs.errors) || [];
   if (chs.error) { view.innerHTML = '<div class="empty"><h3>Не получилось загрузить каналы</h3>Проверьте интернет и попробуйте ещё раз<br><br><button class="btn primary" id="tvRetry">Повторить</button></div>'; $('#tvRetry').onclick = () => render(currentRoute); return; }
   TVS.channels = chs.channels; TVS.byId = new Map(TVS.channels.map((c) => [c.id, c]));
+  if(TVS.scope==='wide'&&(TVS.country||route.category))tvWorldEpgLoad(TVS.country?[TVS.country]:['us','gb','ca']);
   if (route.sportItem && /^[a-f0-9]{32}$/i.test(String(route.sportItem.id || ''))) {
     const s = route.sportItem, existing = TVS.channels.find(c => c.sources?.some(src => src.kind === 'rutube' && src.id === s.id)), id = existing?.id || 'rt:' + s.id;
     const channel = existing || { id, name:String(s.title || 'Спортивный эфир'), group:'Спорт · Rutube', logo:String(s.logo || ''), tvg:'', sources:[{kind:'rutube',id:s.id}] };
@@ -122,32 +135,34 @@ async function renderTv(view, route, alive) {
 function tvRerender() { currentRoute = { name: 'tv', scope: 'wide' }; render(currentRoute); }
 
 function tvHeader() {
-  return `<div class="page-head tv-head"><h1>Телевизор</h1><span class="tv-chip" id="tvEpgChip">${esc(tvEpgStatus())}</span></div>
-    <div class="filters tv-filters">
-      <div class="seg" id="tvScope"><span class="ind"></span>${TV_SCOPES.map(([k, t]) => `<button data-s="${k}">${t}</button>`).join('')}</div>
-      <input class="tv-search" id="tvQ" placeholder="${tvWide() && !TVS.country ? 'Найти среди всех стран' : 'Найти канал'}" value="${esc(TVS.q)}" spellcheck="false">
+  return `<header class="catalog-intro tv-landing-head"><div class="catalog-intro-copy"><span class="catalog-eyebrow">КАТАЛОГ LUMA <i></i> ПРЯМОЙ ЭФИР</span><h1>Телевизор</h1><p>Каналы и программа передач в одном месте.</p></div><span class="tv-chip" id="tvEpgChip">${esc(tvEpgStatus())}</span></header>
+    <div class="filters catalog-toolbar tv-filters">
+      <span class="catalog-filter-label">Источник</span><div class="seg" id="tvScope" aria-label="Источник каналов"><span class="ind"></span>${TV_SCOPES.map(([k, t]) => `<button data-s="${k}" aria-pressed="${k===TVS.scope}">${t}</button>`).join('')}</div>
+      <input class="tv-search" id="tvQ" aria-label="Поиск канала" placeholder="${tvWide() && !TVS.country ? 'Найти среди всех стран' : 'Найти канал'}" value="${esc(TVS.q)}" spellcheck="false"><span class="tv-filter-break" aria-hidden="true"></span><label class="tv-category-filter" id="tvCats"></label>
       ${tvWide() && TVS.country ? `<button class="pill on" id="tvCountry" title="Сбросить страну">${esc(tvRegion(TVS.country))} ✕</button>` : ''}
-      <button class="pill" id="tvManage">${TVI.list.replace('<svg', '<svg width="15" height="15" style="vertical-align:-2px;margin-right:6px"')}Плейлисты</button>
-      <button class="pill" id="tvRefresh" title="Обновить плейлисты и телепрограмму">${TVI.refresh.replace('<svg', '<svg width="15" height="15" style="vertical-align:-2px"')}</button>
+      <button class="pill ${TVS.guide?'on':''}" id="tvGuideToggle">${TVS.guide?'Карточки':'Программа'}</button><button class="pill" id="tvManage">${TVI.list.replace('<svg', '<svg width="15" height="15" style="vertical-align:-2px;margin-right:6px"')}Плейлисты</button>
+      <button class="pill" id="tvRefresh" title="Обновить плейлисты и телепрограмму" aria-label="Обновить плейлисты и телепрограмму">${TVI.refresh.replace('<svg', '<svg width="15" height="15" style="vertical-align:-2px"')}</button>
     </div>`;
 }
 function tvWireHeader(view) {
   const seg = $('#tvScope');
-  $$('button', seg).forEach((b) => b.classList.toggle('on', b.dataset.s === TVS.scope));
+  $$('button', seg).forEach((b) => {const selected=b.dataset.s===TVS.scope;b.classList.toggle('on',selected);b.setAttribute('aria-pressed',String(selected));});
   requestAnimationFrame(() => { try { segIndicator(seg); } catch {} });
   setTimeout(() => { try { segIndicator(seg); } catch {} }, 150);
   seg.onclick = (e) => { const b = e.target.closest('button'); if (!b || b.dataset.s === TVS.scope) return; state.tvPrefs.scope = b.dataset.s; persist('tvPrefs'); TVS.cat = 'Все'; go({ name: 'tv', scope: b.dataset.s }, { replace: true }); };
   $('#tvManage').onclick = () => openTvPlaylists();
+  $('#tvGuideToggle').onclick=()=>{TVS.guide=!TVS.guide;localStorage.setItem('luma.tv.view',TVS.guide?'guide':'cards');TVS.guideSelectedStart=null;render(currentRoute);};
   const cb = $('#tvCountry'); if (cb) cb.onclick = () => { TVS.country = ''; state.tvPrefs.country = ''; persist('tvPrefs'); TVS.cat = 'Все'; TVS.q = ''; tvRerender(); };
   $('#tvRefresh').onclick = async () => { toast('Обновляем плейлисты и телепрограмму…'); await window.lift.tvListRefresh(); render(currentRoute); };
 }
 
 async function tvBrowse(view, alive) {
-  tvStop();
+  if (!tvPreservePip()) tvStop();
   const draw = () => {
     const list = tvFiltered();
     $('#tvBody').innerHTML = tvBodyHTML(list);
     tvWireImgs($('#tvBody'));
+    if(TVS.guide){const host=$('#tvBody');const update=e=>{const el=e.target.closest('[data-guide-ch]'),c=el&&TVS.byId.get(el.dataset.guideCh);if(c)tvGuideFeature(c,el.dataset.guideStart);};host.onmouseover=update;host.onfocusin=update;const first=tvFiltered()[0];if(first)tvGuideFeature(first);}
     paintMore();
   };
   let shown = 0;
@@ -156,10 +171,11 @@ async function tvBrowse(view, alive) {
     if (tvLanding()) return tvCountriesHTML();
     const showHome = TVS.cat === 'Все' && !TVS.q.trim() && !tvWide();
     let html = '';
+    if (TVS.guide&&!tvLanding()){shown=Math.min(PAGE,list.length);if(TVS.scope==='wide')tvWorldEpgLoad([...new Set(list.slice(0,shown).map(c=>c.cc).filter(Boolean))]);return tvGuideHTML(list.slice(0,shown));}
     if (showHome) {
       const rail = (title, ids, extra = '') => {
         const chs = ids.map((id) => TVS.byId.get(id)).filter(Boolean);
-        return chs.length ? `<section class="section"><div class="sec-head"><h2>${title}</h2>${extra}</div><div class="tv-rail">${chs.map((c, i) => tvCard(c, i)).join('')}</div></section>` : '';
+        return chs.length ? `<section class="section"><div class="sec-head"><h2>${title}</h2><div class="tv-rail-actions">${extra}<button class="tv-rail-arrow" data-tv-rail="-1" aria-label="Прокрутить влево">‹</button><button class="tv-rail-arrow" data-tv-rail="1" aria-label="Прокрутить вправо">›</button></div></div><div class="tv-rail">${chs.map((c, i) => tvCard(c, i)).join('')}</div></section>` : '';
       };
       html += rail('Недавно смотрели', tvRecent(10));
       html += rail('Избранные', state.tvFav);
@@ -172,7 +188,7 @@ async function tvBrowse(view, alive) {
     shown = Math.min(PAGE, list.length);
     return html + `<div class="tv-grid" id="tvGrid">${list.slice(0, shown).map((c, i) => tvCard(c, Math.min(i, 14))).join('')}</div><div id="tvMore"></div>`;
   };
-  view.innerHTML = tvHeader() + `<div class="chips tv-cats" id="tvCats"></div>` + (TVS.errors.length ? `<p class="hint bad" style="padding:0 32px">Не загрузился список: ${esc(TVS.errors.map((e) => e.list).join(', '))}. Показаны сохранённые данные, если они есть.</p>` : '') + '<div id="tvBody"></div>';
+  view.innerHTML = tvHeader() + (TVS.errors.length ? `<p class="hint bad" style="padding:0 32px">Не загрузился список: ${esc(TVS.errors.map((e) => e.list).join(', '))}. Показаны сохранённые данные, если они есть.</p>` : '') + '<div id="tvBody"></div>';
   tvWireHeader(view);
   // догрузка больших списков по мере прокрутки
   const io = new IntersectionObserver((en) => {
@@ -180,20 +196,25 @@ async function tvBrowse(view, alive) {
     if (!en[0].isIntersecting) return;
     const list = tvFiltered(), grid = $('#tvGrid'); if (!grid || shown >= list.length) return;
     const next = list.slice(shown, shown + PAGE); shown += next.length;
-    grid.insertAdjacentHTML('beforeend', next.map((c, i) => tvCard(c, i % 14)).join('')); tvWireImgs(grid);
+    grid.insertAdjacentHTML('beforeend', TVS.guide?next.map(tvGuideRow).join(''):next.map((c, i) => tvCard(c, i % 14)).join('')); tvWireImgs(grid);if(TVS.guide&&TVS.scope==='wide')tvWorldEpgLoad([...new Set(next.map(c=>c.cc).filter(Boolean))]);
     paintMore();
   }, { root: $('#main'), rootMargin: '700px' });
   function paintMore() { const m = $('#tvMore'); if (!m) return; io.unobserve(m); io.observe(m); }
-  const drawCats = () => { $('#tvCats').innerHTML = tvCats().map(([g, n]) => `<button class="pill ${g === TVS.cat ? 'on' : ''}" data-g="${esc(g)}">${esc(g)} <small>${n}</small></button>`).join(''); };
+  const drawCats = () => { $('#tvCats').innerHTML = `<span>Категория</span><select id="tvCategory" aria-label="Категория каналов">${tvCats().map(([g,n])=>`<option value="${esc(g)}" ${g===TVS.cat?'selected':''}>${esc(g)} · ${n}</option>`).join('')}</select>`; };
   drawCats(); draw();
-  $('#tvCats').onclick = (e) => { const b = e.target.closest('[data-g]'); if (b) { TVS.cat = b.dataset.g; drawCats(); draw(); } };
+  $('#tvCats').onchange = (e) => { if(e.target.id==='tvCategory'){ TVS.cat=e.target.value;draw(); } };
   $('#tvQ').oninput = debounce((e) => { TVS.q = e.target.value; draw(); }, 200);
   view.onclick = (e) => {
+    const arrow=e.target.closest('[data-tv-rail]');if(arrow){const rail=arrow.closest('section')?.querySelector('.tv-rail');rail?.scrollBy({left:Number(arrow.dataset.tvRail)*Math.max(228,rail.clientWidth*.8),behavior:'smooth'});return;}
+    if(e.target.closest('#tvGuideReminder')){const c=TVS.byId.get(TVS.guideSelected),p=TVS.guideProgram;if(c&&p&&Number(p[0])>Date.now()){const on=tvProgramReminderToggle(c,p,TVS.scope);tvGuideFeature(c,p[0]);toast(on?'Напоминание включено':'Напоминание отменено');}return;}
+    if(e.target.closest('#tvGuideMap')){tvOpenEpgLink(TVS.byId.get(TVS.guideSelected));return;}
+    const shift=e.target.closest('[data-guide-shift]');if(shift){TVS.guideOffset=shift.dataset.guideShift==='now'?0:Math.max(-8,Math.min(90,TVS.guideOffset+Number(shift.dataset.guideShift)));tvGuideRefresh();return;}
+    const gc=e.target.closest('[data-guide-ch]');if(gc){go({name:'tv',ch:gc.dataset.guideCh,scope:TVS.scope});return;}
     const star = e.target.closest('[data-star]');
     if (star) { e.stopPropagation(); const on = tvToggleFav(star.dataset.star); star.classList.toggle('on', on); drawCats(); return; }
     if (e.target.closest('#tvAddFirst')) { openTvPlaylists(true); return; }
     const ext = e.target.closest('[data-ext]'); if (ext) { window.lift.openExternal(ext.dataset.ext); return; }
-    const cc = e.target.closest('[data-cc]'); if (cc) { TVS.country = cc.dataset.cc.toUpperCase(); state.tvPrefs.country = TVS.country; persist('tvPrefs'); TVS.cat = 'Все'; TVS.q = ''; tvRerender(); return; }
+    const cc = e.target.closest('[data-cc]'); if (cc) { TVS.country = cc.dataset.cc.toUpperCase(); tvWorldEpgLoad([TVS.country]); state.tvPrefs.country = TVS.country; persist('tvPrefs'); TVS.cat = 'Все'; TVS.q = ''; tvRerender(); return; }
     const c = e.target.closest('.tv-card'); if (c) go({ name: 'tv', ch: c.dataset.ch, scope: TVS.scope });
   };
   clearInterval(TVS.tick); TVS.tick = setInterval(() => tvTick(), 30000);
@@ -208,12 +229,14 @@ function tvTick(full) {
     const n = $('.now', el); if (n) n.textContent = now ? now[2] : c.group;
     const b = $('.bar i', el); if (b) b.style.width = pct + '%';
   });
+  if (TVS.guide) tvGuideRefresh();
   if (TVS.cur && $('#tvInfo')) tvPaintInfo(TVS.cur);
   const chip = $('#tvEpgChip'); if (chip) chip.textContent = tvEpgStatus();
 }
 
 /* ================= просмотр канала ================= */
 function tvWatch(view, route, alive) {
+  if (document.pictureInPictureElement) tvStop();
   const ch = TVS.byId.get(route.ch);
   view.innerHTML = `<div class="tv-watch">
     <div class="tv-main">
@@ -273,7 +296,7 @@ function tvPaintInfo(ch) {
   const { now, next, pct } = tvNowNext(ch), st = state.tvStats[ch.id];
   const nowLine = $('#tvNowLine');
   if (nowLine) nowLine.innerHTML = now ? `<b>${esc(now[2])}</b><span>${hm(now[0])}–${hm(now[1])}${next ? ' · далее: ' + esc(next[2]) : ''}</span><div class="bar"><i style="width:${pct}%"></i></div>` : `<span>${esc(ch.group)}</span>`;
-  const list = TVS.epg[tvEpgId(ch)] || [], t = Date.now();
+  const list = tvEpgRows(ch), t = Date.now();
   const day0 = new Date(); day0.setHours(0, 0, 0, 0);
   const tab = info.dataset.day || 'today';
   const from = day0.getTime() + (tab === 'tomorrow' ? 864e5 : 0), to = from + 864e5;
@@ -307,6 +330,8 @@ function tvZap(dir) {
 function tvStatus(kind, text, actions) {
   const s = $('#tvStatus'); if (!s) return;
   s.className = 'tv-status ' + (kind || '');
+  const stage = $('#tvStage');
+  if (stage) { stage.classList.toggle('is-buffering', kind === 'loading'); stage.classList.toggle('is-error', kind === 'error'); }
   if (!kind || kind === 'ok') { s.innerHTML = ''; return; }
   s.innerHTML = kind === 'error'
     ? `<div class="tv-err"><b>${esc(text || 'Канал не отвечает')}</b><p>Такое бывает: поток может быть выключен или недоступен в вашем регионе.</p><div class="row-btns" style="justify-content:center"><button class="btn primary" id="tvRetryCh">Повторить</button><button class="btn ghost" id="tvNextCh">Следующий канал</button></div></div>`
@@ -319,8 +344,18 @@ function tvTeardown() {
   if (TVS.hls) { try { TVS.hls.destroy(); } catch {} TVS.hls = null; }
   const v = $('#tvVideo'); if (v) { try { v.pause(); } catch {} v.removeAttribute('src'); try { v.load(); } catch {} }
 }
+function tvPreservePip() {
+  const v = $('#tvVideo');
+  if (!v || document.pictureInPictureElement !== v) return false;
+  let holder = document.getElementById('tvPipHolder');
+  if (!holder) { holder = document.createElement('div'); holder.id = 'tvPipHolder'; holder.style.cssText = 'position:fixed;width:1px;height:1px;left:-10px;top:-10px;overflow:hidden'; document.body.append(holder); }
+  if (v.parentElement !== holder) holder.append(v);
+  if (!v.dataset.lumaPipCleanup) { v.dataset.lumaPipCleanup='1'; v.addEventListener('leavepictureinpicture',()=>{if(v.parentElement?.id==='tvPipHolder'&&v.isConnected&&document.getElementById('tvVideo')===v)tvStop();}); }
+  return true;
+}
 function tvStop() {
-  tvTeardown(); clearInterval(TVS.tick); TVS.cur = null;
+  if (document.pictureInPictureElement?.id === 'tvVideo') document.exitPictureInPicture().catch(()=>{});
+  tvTeardown(); document.getElementById('tvPipHolder')?.remove(); clearInterval(TVS.tick); TVS.cur = null;
   if (document.fullscreenElement) document.exitFullscreen().catch(() => {});
 }
 function tvNext(reason) {
@@ -389,12 +424,12 @@ function buildQuality(h) {
   menu.onclick = (e) => { const b = e.target.closest('[data-l]'); if (!b || !TVS.hls) return; const i = +b.dataset.l; TVS.hls.currentLevel = i; if (i >= 0 && TVS.hls.levels[i]?.height) localStorage.setItem('pl.quality', String(TVS.hls.levels[i].height)); menu.classList.add('hidden'); buildQuality(TVS.hls); };
 }
 function tvPaintVol() {
-  const v = $('#tvVideo'); if (!v) return;
+  const v = $('#tvVideo'); if (!v || !$('#tvMute') || !$('#tvVol')) return;
   $('#tvMute').innerHTML = v.muted || v.volume === 0 ? TVI.mute : TVI.vol;
   $('#tvVol').value = v.muted ? 0 : v.volume;
 }
 function tvPaintPlay() {
-  const v = $('#tvVideo'); if (!v) return;
+  const v = $('#tvVideo'); if (!v || !$('#tvPP') || !$('#tvCenter') || !$('#tvStage')) return;
   const paused = v.paused;
   $('#tvPP').innerHTML = paused ? TVI.play : TVI.pause;
   $('#tvCenter').innerHTML = paused ? TVI.play : TVI.pause;
@@ -424,6 +459,7 @@ function tvBindPlayer(view, alive) {
   $('#tvQ2').onclick = () => $('#tvQMenu').classList.toggle('hidden');
   $('#tvFavBtn').onclick = () => { if (!TVS.cur) return; const on = tvToggleFav(TVS.cur.id); $('#tvFavBtn').classList.toggle('on', on); tvPaintList(); toast(on ? 'Канал в избранном' : 'Убрано из избранного'); };
   $('#tvList').onclick = (e) => {
+    const gc=e.target.closest('[data-guide-ch]');if(gc){go({name:'tv',ch:gc.dataset.guideCh,scope:TVS.scope});return;}
     const star = e.target.closest('[data-star]');
     if (star) { e.stopPropagation(); const on = tvToggleFav(star.dataset.star); star.classList.toggle('on', on); if (TVS.cur && star.dataset.star === TVS.cur.id) $('#tvFavBtn').classList.toggle('on', on); return; }
     const it = e.target.closest('.tv-item'); if (it && (!TVS.cur || it.dataset.id !== TVS.cur.id)) tvSwitch(it.dataset.id);

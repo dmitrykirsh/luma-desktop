@@ -55,7 +55,7 @@ function parseM3u(text, { dropAdult = false } = {}) {
     else if (meta && /^https?:\/\//i.test(line)) {
       let url = line, ua = opts.ua, ref = opts.ref;
       const bar = url.indexOf('|');                                                // Kodi-стиль: url|User-Agent=..&Referer=..
-      if (bar > 0) { for (const kv of url.slice(bar + 1).split('&')) { const [k, ...v] = kv.split('='); const val = decodeURIComponent(v.join('=')); if (/^user-agent$/i.test(k)) ua = val; else if (/^referr?er$/i.test(k)) ref = val; } url = url.slice(0, bar); }
+      if (bar > 0) { for (const kv of url.slice(bar + 1).split('&')) { const [k, ...v] = kv.split('='); let val = v.join('='); try { val = decodeURIComponent(val); } catch {} if (/^user-agent$/i.test(k)) ua = val; else if (/^referr?er$/i.test(k)) ref = val; } url = url.slice(0, bar); }
       const group = meta.attrs['group-title'] || grp || 'Без категории';
       if (!(dropAdult && (ADULT.test(group) || ADULT.test(meta.name)))) {
         out.push({ name: meta.name || 'Без названия', group, logo: meta.attrs['tvg-logo'] || '', tvg: (meta.attrs['tvg-id'] || '').toLowerCase(), url, ua, ref });
@@ -203,6 +203,8 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
     } catch (e) { return errCode(e); }
   });
 
+  require('./world-epg')({ipcMain,net,channelsFor});
+
   /* ---------- свои плейлисты ---------- */
   const publicList = async (e) => {
     let count = 0, error = '';
@@ -272,7 +274,7 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
         const id = (block.match(/^<channel\s+id="([^"]*)"/) || [])[1]; if (!id) return;
         for (const n of block.matchAll(/<display-name[^>]*>([\s\S]*?)<\/display-name>/g)) {
           const k = nrm(decodeXml(n[1]));
-          if (k && wantedNames.has(k) && !nameToEpg.has(k)) { nameToEpg.set(k, id); wantedIds.add(id); }
+          if (k && wantedNames.has(k)) { if (!nameToEpg.has(k)) nameToEpg.set(k, new Set()); nameToEpg.get(k).add(id); wantedIds.add(id); }
         }
       };
       const onProg = (block) => {
@@ -300,8 +302,8 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
       clearTimeout(t);
       for (const id of Object.keys(programmes)) programmes[id].sort((x, y) => x[0] - y[0]);
       const alias = {};
-      for (const [k, ids] of wantedNames) { const e = nameToEpg.get(k); if (e && programmes[e]) for (const id of ids) alias[id] = e; }
-      epg = { fetchedAt: Date.now(), programmes, alias, total, rutubeVersion:mem.has('rutube:live') ? 1 : 0 };
+      for (const [k, ids] of wantedNames) { const matches = nameToEpg.get(k); if (!matches || matches.size !== 1) continue; const e = [...matches][0]; if (programmes[e]) for (const id of ids) alias[id] = e; }
+      epg = { aliasVersion: 2, fetchedAt: Date.now(), programmes, alias, total, rutubeVersion:mem.has('rutube:live') ? 1 : 0 };
       try { fs.writeFileSync(epgFile, JSON.stringify(epg)); } catch {}
       send('tv:epg-state', { busy: false, fetchedAt: epg.fetchedAt });
       send('tv:epg-updated');
@@ -309,7 +311,7 @@ module.exports = function initTv({ ipcMain, app, protocol, net, dialog, getStore
       send('tv:epg-state', { busy: false, error: e.code || e.name || 'ERR', fetchedAt: epg.fetchedAt });
     } finally { epgBusy = false; }
   }
-  function epgIfNeeded(force) { if (force || (!epg.rutubeVersion && mem.has('rutube:live')) || Date.now() - (epg.fetchedAt || 0) > EPG_TTL) refreshEpg(); }
+  function epgIfNeeded(force) { if (force || epg.aliasVersion !== 2 || (!epg.rutubeVersion && mem.has('rutube:live')) || Date.now() - (epg.fetchedAt || 0) > EPG_TTL) refreshEpg(); }
   ipcMain.handle('tv:epg', () => { epgIfNeeded(false); return { fetchedAt: epg.fetchedAt, busy: epgBusy, programmes: epg.programmes, alias: epg.alias }; });
   ipcMain.handle('tv:epg-refresh', () => { refreshEpg(); return { ok: true }; });
 

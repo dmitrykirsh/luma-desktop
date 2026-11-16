@@ -3,6 +3,15 @@
 // которые блокировка не трогает. Делаем так же: список доменов с запоминанием рабочего
 // (как api_failover у них в приложении). Подробности: ../animeon-api.md
 module.exports = function initAnimeon({ ipcMain, getStore, saveStore }) {
+  const shikiCache = new Map();
+  async function shikiGet(path) {
+    const cached=shikiCache.get(path); if(cached && Date.now()-cached.time<3600000)return cached.value;
+    const response=await fetch('https://shikimori.io/api/'+path,{headers:{'User-Agent':'Luma/1.0','Accept':'application/json'},signal:AbortSignal.timeout(12000)});
+    if(!response.ok)throw Error('Shikimori HTTP '+response.status);
+    const value=await response.json();shikiCache.set(path,{value,time:Date.now()});return value;
+  }
+  ipcMain.handle('shikimori:characters',async (_e,id)=>{try{if(!/^\d{1,9}$/.test(String(id)))return {error:'BAD_ID'};const roles=await shikiGet('animes/'+id+'/roles');if(!Array.isArray(roles))throw Error('invalid');return {items:roles.filter(x=>x.character?.id).map(x=>({id:x.character.id,name:x.character.russian||x.character.name,original:x.character.name,image:x.character.image?.preview?'https://shikimori.io'+x.character.image.preview:'',role:(x.roles||[]).includes('Main')?'Главный персонаж':'Персонаж'}))};}catch{return {error:'NETWORK'};}});
+  ipcMain.handle('shikimori:character',async (_e,id)=>{try{if(!/^\d{1,9}$/.test(String(id)))return {error:'BAD_ID'};const x=await shikiGet('characters/'+id);return {id:x.id,name:x.russian||x.name,original:x.name,description:String(x.description_html||x.description||'').slice(0,30000),image:x.image?.original?'https://shikimori.io'+x.image.original:''};}catch{return {error:'NETWORK'};}});
   const HOSTS = ['https://api.animeon.cloud', 'https://api.animeon.co'];
   const cache = new Map();   // url -> { t, v }
   // постеры и кадры (/media/anime/poster/…) отдаёт тот же API-домен, что и данные
@@ -91,6 +100,7 @@ module.exports = function initAnimeon({ ipcMain, getStore, saveStore }) {
       slug: c.anime_url || '',
       title: c.title || md.anime_title || '',
       titleOrig: c.title_orig || md.title_en || '',
+      aliases: String(c.other_title || '').split(/\s*\/\s*/).map(x=>x.trim()).filter(Boolean).slice(0,8),
       type: KIND_TYPE[kindOf(c)] || 7,
       year: yearOf(c),
       status: c.status || md.anime_status || '',
@@ -113,6 +123,8 @@ module.exports = function initAnimeon({ ipcMain, getStore, saveStore }) {
       kodikId: c.kodik_id || '',
       trailer: c.trailer_id || '',
       stills,                 // кадры серий для «живого» фона карточки
+      episodeStills: Object.fromEntries(Object.entries(c.episode_screenshots || {}).filter(([ep, images]) => /^\d+$/.test(ep) && Array.isArray(images) && images.length).map(([ep, images]) => [ep, abs(images[0])]).filter(([, url]) => /^https:\/\//i.test(url))),
+      episodeStillAlternatives: Object.fromEntries(Object.entries(c.episode_screenshots || {}).filter(([ep, images]) => /^\d+$/.test(ep) && Array.isArray(images)).map(([ep, images]) => [ep, [...new Set(images.filter(url => typeof url === 'string').map(abs).filter(url => /^https:\/\//i.test(url)))].slice(0, 5)]).filter(([, images]) => images.length)),
       episodesAvailable: c.episodes_available || episodes.length,
       episodes,                 // [1,2,…] — объединение серий всех озвучек
       voices,                   // { 'AniDUB': { '1': 'https://kodikplayer.com/…', … } }
@@ -241,14 +253,15 @@ module.exports = function initAnimeon({ ipcMain, getStore, saveStore }) {
       return { comments: (result.comments || []).filter((c) => !c.is_deleted && c.body).map((c) => ({ author: c.author_username || 'Пользователь', body: String(c.body).slice(0, 5000), date: c.created_at, likes: Number(c.likes_count) || 0, replies: Number(c.replies_count) || 0 })), hasMore: (result.comments || []).length >= 20, total: Number(result.total) || 0 };
     } catch { return { error: 'NETWORK' }; }
   });
+  ipcMain.handle('animeon:genres',async()=>{try{const r=await aget('/api/anime/filters',3600000);return {items:(Array.isArray(r.genres)?r.genres:[]).filter(x=>typeof x==='string'&&x.trim()).map(x=>x.trim())};}catch{return {items:[],error:'NETWORK'};}});
   ipcMain.handle('animeon:catalog', async (_e, q) => {
     try {
       const page = Math.max(1, Number(q?.page) || 1), limit = Math.min(48, Math.max(8, Number(q?.limit) || 24));
       if (q?.feed === 'new') {
-        // Новинки — уже вышедшие недавние тайтлы, упорядоченные по популярности.
-        const chunks = await Promise.all([1,2,3,4].map(n => aget(`/api/anime?page=${n}&limit=48&sort=popular`, 120000)));
+        // Недавние завершённые релизы по популярности; текущие онгоинги остаются в отдельной ленте.
+        const chunks = await Promise.all([1,2,3,4].map(n => aget(`/api/anime?page=${n}&limit=48&sort=popular&status=released`, 120000)));
         const year = new Date().getFullYear();
-        const items = chunks.flatMap(x => x?.items || []).map(compact).filter(x => x.slug && x.year >= year-1 && x.year <= year);
+        const items = chunks.flatMap(x => x?.items || []).map(compact).filter(x => x.slug && x.status === 'released' && x.year >= year-1 && x.year <= year);
         return {items:items.slice((page-1)*limit,page*limit), page, total:items.length};
       }
       if (q?.feed === 'recent') {

@@ -9,6 +9,7 @@ const TRAILER_WORDS = /трейлер|trailer|тизер|teaser|official|офи�
 
 /** Подходит ли найденное видео фильму t = { name, origin, year }. Возвращает оценку (0 — не подходит). */
 function score(t, v) {
+  if(t.anime && (!/(?:аниме|anime|анимац|animation|animated)/i.test(String(v.title||'')) || /(?:live[ -]?action|игров(?:ой|ая|ого)|художественн(?:ый|ого) фильм)/i.test(String(v.title||'')+' '+String(v.description||''))))return 0;
   const title = nrm(v.title);
   const base = value => String(value || '').replace(/\s*\[(?:тв|tv)[-\s]*(\d+)\]/ig, '').replace(/\s*\(\d{4}\)\s*$/, '');
   const names = [t.name, t.origin].map(base).map(nrm).filter((n) => n.length >= 3);

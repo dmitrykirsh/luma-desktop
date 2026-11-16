@@ -6,6 +6,30 @@ const SHARED = 'https://luma-tmdb-shared.dimakirsch.workers.dev';
 const TV_TYPES = [3, 4, 5, 7];
 const MOVIE_TYPES = [1, 2, 6];
 
+// Avoid assigning artwork or trailers to a similarly named remake.
+function tmdbSelectMatch(results, {names, year, kind, anime}) {
+  const norm=x=>String(x||'').toLowerCase().replace(/ё/g,'е').normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  const inputs=[...new Set((names||[]).map(norm).filter(Boolean))];
+  if(!inputs.length)return null;
+  const requestedYear=Number(year)||0,scored=[];
+  for(const r of Array.isArray(results)?results:[]){
+    if(!Number.isSafeInteger(Number(r?.id))||Number(r.id)<=0)continue;
+    if(anime&&(!Array.isArray(r.genre_ids)||!r.genre_ids.includes(16)))continue;
+    const titles=[r.title,r.name,r.original_title,r.original_name].map(norm).filter(Boolean);
+    const exact=inputs.some(x=>titles.includes(x));
+    if(!exact)continue;
+    const candidateYear=Number(String(r.release_date||r.first_air_date||'').slice(0,4))||0;
+    const checkYear=requestedYear&&!(anime&&kind==='tv');
+    if(checkYear&&(!candidateYear||Math.abs(candidateYear-requestedYear)>1))continue;
+    const distance=requestedYear&&candidateYear?Math.abs(requestedYear-candidateYear):null;
+    const score=(exact?1000:0)+(distance===null?0:Math.max(0,100-distance));
+    scored.push({r,score});
+  }
+  scored.sort((a,b)=>b.score-a.score);
+  if(!scored.length||scored.some(x=>x.score===scored[0].score&&Number(x.r.id)!==Number(scored[0].r.id)))return null;
+  return scored[0].r;
+}
+
 module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, getJson, API }) {
   const mem = new Map();
   let directBadUntil = 0;   // до этого времени прямой путь к TMDB считаем неработающим
@@ -145,9 +169,21 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
       return { items: await matchList((j.results || []).slice(0, 20), kind || 'movie') };
     } catch (e) { return errCode(e); }
   });
+  ipcMain.handle('tmdb:curated',async(_e,kind,feed)=>{
+    if(!['movie','tv'].includes(kind)||!['week','top'].includes(feed))return {error:'BAD_REQUEST',items:[]};
+    try{const path=feed==='week'?'/trending/'+kind+'/week':'/'+kind+'/top_rated',j=await tmdb(path,{},1800000),rows=(j.results||[]).slice(0,20);
+      const matched=await pool(rows,4,async t=>{try{const names=[t.title,t.name,t.original_title,t.original_name].map(nrm).filter(Boolean),year=Number(String(t.release_date||t.first_air_date||'').slice(0,4));if(!year||!names.length)return {item:null};const found=new Map();for(const q of [...new Set([t.title||t.name,t.original_title||t.original_name].filter(Boolean))]){const data=await getJson(API+'/search?q='+encodeURIComponent(q),900000);for(const x of data.items||[]){if(Number(x.type)!==(kind==='movie'?1:3)||!Number(x.year)||Math.abs(Number(x.year)-year)>1)continue;if([x.name,x.origin_name].map(nrm).some(n=>n&&names.includes(n)))found.set(String(x.id),x);}}const candidates=[...found.values()].sort((a,b)=>Math.abs(Number(a.year)-year)-Math.abs(Number(b.year)-year));if(candidates.length>1&&Math.abs(Number(candidates[0].year)-year)===Math.abs(Number(candidates[1].year)-year))return {item:null};return {item:candidates[0]||null};}catch{return {error:true};}});
+      return {items:matched.filter(x=>x?.item).map(x=>x.item),partial:matched.some(x=>!x||x.error)};
+    }catch(e){return {...errCode(e),items:[]};}
+  });
 
   // A schedule must belong to the same title, not merely a similar name.
   // Keep this request light: no artwork or recommendation matching is needed.
+  ipcMain.handle('tmdb:season-episodes', async (_e, arg) => {
+    const id=Number(arg?.id), season=Number(arg?.season);
+    if(!Number.isSafeInteger(id)||id<1||!Number.isInteger(season)||season<0||season>1000)return [];
+    try {const data=await tmdb(`/tv/${id}/season/${season}`,{},3600000);return (data.episodes||[]).map(e=>({number:e.episode_number,name:String(e.name||''),date:String(e.air_date||''),runtime:Number(e.runtime)||0,still:String(e.still_path||'')}));} catch {return [];}
+  });
   ipcMain.handle('tmdb:episode-detail', async (_e, arg) => {
     const id=Number(arg?.id), season=Number(arg?.season), episode=Number(arg?.episode);
     if(!Number.isInteger(id)||id<1||!Number.isInteger(season)||season<0||!Number.isInteger(episode)||episode<1)return null;
@@ -198,39 +234,34 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
   // кадры, логотип и рекомендации для конкретного фильма Luma
   ipcMain.handle('tmdb:find', async (_e, it) => {
     try {
-      const kind = TV_TYPES.includes(it.type) ? 'tv' : 'movie';
-      const anime = [6, 7].includes(it.type);
-      const clean = (s) => anime ? String(s || '').replace(/\s*\[(?:ТВ|TV)[-\s]*\d+\]/gi, '').replace(/\s*\((?:19|20)\d{2}\)\s*$/g, '').trim() : String(s || '').trim();
+      const kind = TV_TYPES.includes(Number(it.type)) ? 'tv' : 'movie';
+      const anime = [6, 7].includes(Number(it.type));
+      const clean = (s) => anime ? String(s || '').replace(/\s*\[(?:ТВ|TV)[-\s]*\d+(?:[^\]]*)\]/gi, '').replace(/\s+(?:season|сезон)\s*\d+(?:\s*(?:part|часть)\s*\d+)?\s*$/i, '').replace(/\s*\((?:19|20)\d{2}\)\s*$/g, '').trim() : String(s || '').trim();
       const name = clean(it.name), origin = clean(it.origin_name);
-      const queries = [...new Set([origin, origin.replace(/uu/gi, 'u'), name].filter(Boolean))];
+      const aliases=(Array.isArray(it.aliases)?it.aliases:[]).map(clean);const queries = [...new Set([origin, origin.replace(/uu/gi, 'u'), name, ...aliases].filter(Boolean))];
       let found = null;
       for (const q of queries) {
         const p = { query: q };
         if (it.year) p[kind === 'tv' ? 'first_air_date_year' : 'year'] = it.year;
         let j = await tmdb('/search/' + kind, p, 3600000);
-        const pick = (results) => (results || []).map(r => {
-          const title = r.title || r.name || '', original = r.original_title || r.original_name || '';
-          if (![name, origin, q].some(v => nameOk(title, v) || nameOk(original, v))) return null;
-          const exact = [name, origin, q].some(v => nrm(v) && (nrm(title) === nrm(v) || nrm(original) === nrm(v)));
-          const y = Number(String(r.release_date || r.first_air_date || '').slice(0, 4));
-          return { r, score: (exact ? 100 : 0) + (it.year && y ? Math.max(0, 20 - Math.abs(it.year - y) * 5) : 0) + Math.min(10, Number(r.vote_count || 0) / 1000) };
-        }).filter(Boolean).sort((a, b) => b.score - a.score)[0]?.r || null;
+        const pick = results => tmdbSelectMatch(results,{names:[name,origin,q,...aliases],year:it.year,kind,anime});
         found = pick(j.results);
         if (!found && it.year) { delete p.year; delete p.first_air_date_year; j = await tmdb('/search/' + kind, p, 3600000); found = pick(j.results); }
         if (found) break;
       }
       if (!found) return { none: true };
-      const d = await tmdb('/' + kind + '/' + found.id, { append_to_response: 'images,recommendations,external_ids', include_image_language: 'ru,en,null' }, 3600000);
+      const d = await tmdb('/' + kind + '/' + found.id, { append_to_response: 'images,recommendations,external_ids', include_image_language: anime ? 'ru,en,ja,null' : 'ru,en,null' }, 3600000);
       const bds = (d.images?.backdrops || []).slice().sort((a, b) => b.vote_average - a.vote_average).slice(0, 30).map((b) => b.file_path);
       const logos = d.images?.logos || [];
       const logo = (logos.find((l) => l.iso_639_1 === 'ru') || logos.find((l) => l.iso_639_1 === 'en') || logos[0])?.file_path || '';
       const recs = await Promise.race([matchList((d.recommendations?.results || []).slice(0, 20), kind), new Promise(resolve => setTimeout(() => resolve([]), 2000))]);
       const next = kind === 'tv' && d.next_episode_to_air ? d.next_episode_to_air : null;
-      const part = anime && kind === 'tv' ? /\[(?:ТВ|TV)[-\s]*(\d+)\]/i.exec(String(it.name || '')) : null;
+      const part = anime && kind === 'tv' ? /\[(?:ТВ|TV)[-\s]*(\d+)[^\]]*\]/i.exec(String(it.name || '')) : null;
       const firstYear = Number(String(d.first_air_date || '').slice(0, 4));
       const seasonPoster = part && Number(it.year) && firstYear && Math.abs(firstYear - Number(it.year)) > 1
         ? (d.seasons || []).find(s => s.season_number === Number(part[1]) && Math.abs(Number(String(s.air_date || '').slice(0, 4)) - Number(it.year)) <= 1)?.poster_path : '';
-      return { tmdb: found.id, backdrop: d.backdrop_path || bds[0] || '', backdrops: bds, logo, recs: recs.map((r) => ({ ...r.item, alt: r.poster })), poster: seasonPoster || d.poster_path || '', seasonPoster: !!seasonPoster, vote: d.vote_average, kind, imdb: d.external_ids?.imdb_id || d.imdb_id || '', nextEpisode: next?.air_date ? { date: next.air_date, season: next.season_number, episode: next.episode_number, name: next.name || '' } : null };
+      const safeOverview = !anime && Number(it.year) && Math.abs(Number(it.year)-Number(String(d.first_air_date||d.release_date||'').slice(0,4)))<=1 && [name,origin].some(n=>nrm(n)&&[d.name,d.original_name,d.title,d.original_title].some(v=>nrm(v)===nrm(n))) ? String(d.overview||'').trim() : '';
+      return { overview:safeOverview, tmdb: found.id, backdrop: d.backdrop_path || bds[0] || '', backdrops: bds, logo, recs: recs.map((r) => ({ ...r.item, alt: r.poster })), poster: seasonPoster || d.poster_path || '', seasonPoster: !!seasonPoster, vote: d.vote_average, kind, imdb: d.external_ids?.imdb_id || d.imdb_id || '', nextEpisode: next?.air_date ? { date: next.air_date, season: next.season_number, episode: next.episode_number, name: next.name || '' } : null };
     } catch (e) { return errCode(e); }
   });
   /* ---------- люди: страница актёра ---------- */

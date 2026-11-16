@@ -1,7 +1,7 @@
 {
   "name": "luma-desktop",
   "productName": "Luma",
-  "version": "2.16.0",
+  "version": "2.17.0",
   "description": "Luma — кинотеатр для Windows. Включи свою историю",
   "main": "main.js",
   "scripts": {
@@ -18,6 +18,9 @@
       "animeon-auth.js",
       "skip-times.js",
       "rutube.js",
+      "vkvideo.js",
+      "source-title-match.js",
+      "world-epg.js",
       "rutube-access.js",
       "preload.js",
       "tmdb.js",

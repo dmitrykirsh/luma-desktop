@@ -158,6 +158,18 @@ function injectKodikBridge(frame) {
   try { if (frame && /^https:\/\/([\w-]+\.)?kodikplayer\.com\//.test(frame.url)) frame.executeJavaScript(kodikBridgeSource()).catch(() => {}); } catch {}
 }
 
+// Accept only Kodik's actual video manifests, never ad media or arbitrary URLs.
+function kodikManifest(url) {
+  try { const u=new URL(url); return u.protocol==='https:' && /^(?:[a-z0-9-]+\.)*solodcdn\.com$/i.test(u.hostname) && /^\/(?:useruploads|animetvseries)\/.+\/(?:240|360|480|720|1080|1440|2160)\.mp4:hls:manifest(?:-v[0-9]+-a[0-9]+)?\.m3u8$/i.test(u.pathname); } catch { return false; }
+}
+ipcMain.on('player:resolver-mute', (event, muted) => { if (win && event.sender === win.webContents) win.webContents.setAudioMuted(muted === true); });
+ipcMain.handle('player:kodik-qualities', async (_e, url) => {
+  if (!kodikManifest(url)) return [];
+  const levels=[240,360,480,720,1080,1440,2160];
+  const results=await Promise.all(levels.map(async q=>{const candidate=url.replace(/\/(?:240|360|480|720|1080|1440|2160)\.mp4:hls:/i,`/${q}.mp4:hls:`);try {let next=candidate,response;for(let hop=0;hop<4;hop++){response=await fetch(next,{headers:{Referer:'https://kodikplayer.com/'},redirect:'manual',signal:AbortSignal.timeout(5000)});if(response.status<300||response.status>=400)break;const loc=response.headers.get('location');if(!loc)return null;next=new URL(loc,next).href;if(!kodikManifest(next))return null;}if(!response?.ok){if(process.env.LIFT_LOG)console.log('[kodik] probe',q,response?.status);return null;}const text=await response.text();return text.startsWith('#EXTM3U')?{quality:q,url:candidate}:null;}catch(e){if(process.env.LIFT_LOG)console.log('[kodik] probe',q,e.name);return null;}}));
+  if(process.env.LIFT_LOG)console.log('[kodik] verified levels',results.filter(Boolean).map(x=>x.quality).join(','));return results.filter(Boolean);
+});
+
 // ---------- простое хранилище в userData ----------
 const storeFile = () => path.join(app.getPath('userData'), 'store.json');
 let store = {};
@@ -211,15 +223,44 @@ async function getJson(url, ttl = 120000) {
 let findTrailers = () => [];
 
 const tmApi = require('./tmdb')({ ipcMain, safeStorage, getStore: () => store, saveStore, getJson, API });
+ipcMain.handle('cinemeta:art', async (_event, arg) => {
+  const id=String(arg?.imdb||''),kind=arg?.kind==='tv'?'series':arg?.kind==='movie'?'movie':'';
+  if(!/^tt\d{5,12}$/.test(id)||!kind)return null;
+  try{const r=await fetch(`https://v3-cinemeta.strem.io/meta/${kind}/${id}.json`,{signal:AbortSignal.timeout(6000)});if(!r.ok)return null;const m=(await r.json()).meta;if(!m||m.id!==id)return null;const safe=x=>{try{const u=new URL(x);return u.protocol==='https:'&&u.hostname==='images.metahub.space'?u.href:''}catch{return ''}};return {logo:safe(m.logo),background:safe(m.background)};}catch{return null;}
+});
+ipcMain.handle('platform:source', async (_event, raw) => {
+  try {
+    const u=new URL(String(raw||''));
+    const wiki=(u.hostname==='en.wikipedia.org'||u.hostname==='ru.wikipedia.org')&&u.pathname==='/w/api.php'&&u.searchParams.get('action')==='parse'&&u.searchParams.get('format')==='json'&&/^(?:List of (?:Netflix|ended Netflix|Amazon Prime Video|Disney\+|HBO|Hulu|Paramount\+|Apple TV\+)|Crunchyroll Originals|Шаблон:Кинопоиск)/i.test(u.searchParams.get('page')||'');
+    const okkoWiki=u.hostname==='ru.wikipedia.org'&&u.pathname==='/w/api.php'&&u.searchParams.get('action')==='query'&&u.searchParams.get('format')==='json'&&((u.searchParams.get('list')==='categorymembers'&&u.searchParams.get('cmtitle')==='Категория:Сериалы онлайн-кинотеатра Okko'&&u.searchParams.get('cmtype')==='page')||(u.searchParams.get('prop')==='extracts'&&u.searchParams.get('explaintext')==='1'&&(u.searchParams.get('titles')||'').length<=1500&&(u.searchParams.get('titles')||'').split('|').length<=20));
+    const premier=u.hostname==='premier.one'&&(/^\/collections\/sdelano-premier\/?$/.test(u.pathname)||/^\/show\/[a-z0-9-]+\/?$/i.test(u.pathname));
+    const okko=u.hostname==='okko.tv'&&/^\/collection\/okko_originals_rail\/?$/.test(u.pathname)&&!u.search;
+    if(u.protocol!=='https:'||(!wiki&&!premier&&!okkoWiki&&!okko)||u.username||u.password)return {error:'INVALID_SOURCE'};
+    const response=await fetch(u,{headers:{'User-Agent':'Luma/2.16 (public catalogue metadata)'},signal:AbortSignal.timeout(10000)});
+    if(!response.ok)return {error:'HTTP'};const text=await response.text();if(text.length>4000000)return {error:'TOO_LARGE'};return {text};
+  }catch{return {error:'NETWORK'};}
+});
 require('./animeon')({ ipcMain, getStore: () => store, saveStore });
 require('./skip-times')({ipcMain});
 const animeonAuth = require('./animeon-auth')({ ipcMain, BrowserWindow, session, safeStorage, getStore: () => store, saveStore, getWindow: () => win });
 require('./rutube')({ ipcMain });
+require('./vkvideo')({ ipcMain });
 require('./diag')({ ipcMain, app, getStore: () => store, tm: tmApi });
 const updater = require('./updater')({ ipcMain, app, getWindow: () => win });
 const tvApi = require('./tv')({ ipcMain, app, protocol, net, dialog, getStore: () => store, saveStore, getWindow: () => win });
 const trailerApi = require('./trailers')({ getJson, tm: tmApi, youtubeFetch: async (url, opts) => { await prepareYoutube(); return youtubeBypass.fetch(url, opts); } });
 findTrailers = trailerApi.findTrailers;
+ipcMain.handle('youtube:live-search', async (_event, query) => {
+  if (typeof query !== 'string' || query.length < 3 || query.length > 160) return {error:true};
+  try {
+    await prepareYoutube();
+    const url = 'https://www.youtube.com/results?search_query=' + encodeURIComponent(query) + '&sp=EgJAAQ%3D%3D&hl=en';
+    const response = await youtubeBypass.fetch(url, {signal: AbortSignal.timeout(15000)});
+    if (!response.ok) return {error:true};
+    const html = await response.text();
+    return html.length <= 3000000 ? {html} : {error:true};
+  } catch { return {error:true}; }
+});
 const lbApi = require('./lb')({ ipcMain, safeStorage, getStore: () => store, saveStore, getJson, API, getMainWindow: () => win, tm: tmApi });
 require('./torrents')({ ipcMain, app, net, getWindow: () => win });
 
@@ -289,6 +330,15 @@ ipcMain.handle('player:autoplay', async () => {
 });
 // Обычный плеер получает команды через postMessage. Kodik иногда прячет видео во
 // вложенном фрейме, поэтому для него дублируем команду во все фреймы источника.
+ipcMain.handle('player:pip', async (_e, action) => {
+  if(!win)return {ok:false};const frames=playerFrames();
+  for(const fr of frames){try{
+    const isMain=fr===win.webContents.mainFrame;
+    const code=action==='exit'?`(async()=>{if(document.pictureInPictureElement){await document.exitPictureInPicture();return true}return false})()`:`(async()=>{const v=${isMain?"document.querySelector('#player video')":"document.querySelector('.main-player video.fp-engine, video.fp-engine') || document.querySelector('video')"};if(!v||v.readyState<1||!document.pictureInPictureEnabled)return false;if(!v.__lumaPip){v.__lumaPip=true;v.addEventListener('leavepictureinpicture',()=>{try{top.postMessage({lumaPip:'leave'},'*')}catch{}})}await v.requestPictureInPicture();return true})()`;
+    if(await fr.executeJavaScript(code,true))return {ok:true};
+  }catch{}}
+  return {ok:false};
+});
 ipcMain.handle('player:command', async (_e, message) => {
   const m = message && typeof message === 'object' ? message : null;
   if (!m || typeof m.c !== 'string') return;
@@ -411,39 +461,30 @@ app.whenReady().then(() => {
   loadStore();
     // Rutube's public HLS manifests do not expose CORS headers to file:// players.
     session.defaultSession.webRequest.onHeadersReceived(
-      { urls: ['https://bl.rutube.ru/*', 'https://*.rtbcdn.ru/*'] },
+      { urls: ['https://bl.rutube.ru/*', 'https://*.rtbcdn.ru/*', 'https://solodcdn.com/*', 'https://*.solodcdn.com/*', 'https://*.okcdn.ru/*', 'https://*.vkuser.net/*', 'https://*.vkvideo.ru/*', 'https://*.vkuseraudio.net/*', 'https://usher.ttvnw.net/*', 'https://*.ttvnw.net/*'] },
       (d, cb) => cb({ responseHeaders: { ...d.responseHeaders, 'Access-Control-Allow-Origin': ['*'] } })
     );
-  // плеер и картинки ждут обычный Referer сайта
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['https://*.liftw.ws/*'] },
-    (d, cb) => { d.requestHeaders['Referer'] = 'https://liftw.ws/'; d.requestHeaders['Origin'] = 'https://liftw.ws'; cb({ requestHeaders: d.requestHeaders }); }
-  );
-  // Ссылки Kodik, которые отдаёт Animeon, подписаны для встраивания с animeon.cc.
-  // В Electron родитель — file://, из-за чего страница открывалась, но поток мог
-  // остаться на 0:00. Передаём тот же Referer, что у официального сайта Animeon.
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['https://kodikplayer.com/*', 'https://*.kodikplayer.com/*'] },
-    (d, cb) => { d.requestHeaders['Referer'] = 'https://animeon.cc/'; d.requestHeaders['Origin'] = 'https://animeon.cc'; cb({ requestHeaders: d.requestHeaders }); }
-  );
+  // Заголовки только для известных источников встроенных плееров.
+  session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ['<all_urls>'] }, (d, cb) => {
+    let h='';try{h=new URL(d.url).hostname.toLowerCase()}catch{}
+    if(h==='youtube.com'||h.endsWith('.youtube.com')||h==='youtube-nocookie.com'||h.endsWith('.youtube-nocookie.com')){d.requestHeaders.Referer='https://liftw.ws/';} else if(h.endsWith('.liftw.ws')){d.requestHeaders.Referer='https://liftw.ws/';d.requestHeaders.Origin='https://liftw.ws';}
+    else if(h==='kodikplayer.com'||h.endsWith('.kodikplayer.com')){d.requestHeaders.Referer='https://animeon.cc/';d.requestHeaders.Origin='https://animeon.cc';}
+    else if(['okcdn.ru','vkuser.net','vkvideo.ru','vkuseraudio.net'].some(x=>h===x||h.endsWith('.'+x))){d.requestHeaders.Referer='https://vkvideo.ru/';d.requestHeaders.Origin='https://vkvideo.ru';d.requestHeaders['User-Agent']='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/150.0.0.0 Safari/537.36';}
+    cb({requestHeaders:d.requestHeaders});
+  });
   // Реклама и метрика внешних iframe-плееров. Блокируем только известные
   // рекламные скрипты/пиксели: CDN видео, manifest и сегменты сюда намеренно
   // не входят, чтобы воспроизведение не зависело от блокировщика.
-  if (!process.env.LUMA_NO_BLOCK) session.defaultSession.webRequest.onBeforeRequest(
-    { urls: [
-      '*://s.namy.ws/*', '*://vuegenesisvue.com/*', '*://*.vuegenesisvue.com/*',
-      '*://kodikplayer.com/adsbygoogle.js', '*://*.kodikplayer.com/adsbygoogle.js',
-      '*://code.moviead55.ru/*', '*://mc.yandex.ru/*', '*://*.yandex.ru/watch/*',
-      '*://vidalak.com/api/vpaid*', '*://ad.mail.ru/*', '*://ssp.surfy.space/wrap/vpaid*', '*://s2.sapfir.tv/*',
-      '*://cdn.jsdelivr.net/npm/yandex-metrica-watch/*'
-    ] },
-    (d, cb) => { if (process.env.LUMA_DEBUG_BLOCK) console.log('[blocked]', d.url.slice(0, 100)); cb({ cancel: true }); }
-  );
-  // YouTube-встраивание требует Referer
-  session.defaultSession.webRequest.onBeforeSendHeaders(
-    { urls: ['https://www.youtube-nocookie.com/*', 'https://www.youtube.com/embed/*'] },
-    (d, cb) => { d.requestHeaders['Referer'] = 'https://liftw.ws/'; cb({ requestHeaders: d.requestHeaders }); }
-  );
+  session.defaultSession.webRequest.onBeforeRequest({urls:['<all_urls>']}, (d, cb) => {
+    let u;try{u=new URL(d.url)}catch{cb({});return;}
+    const h=u.hostname.toLowerCase(),p=u.pathname;
+    const ad=h==='s.namy.ws'||h==='vuegenesisvue.com'||h.endsWith('.vuegenesisvue.com')||h==='code.moviead55.ru'||h==='mc.yandex.ru'||h==='ad.mail.ru'||h==='s2.sapfir.tv'||h==='aj0453.top'||h.endsWith('.aj0453.top')||((h==='kodikplayer.com'||h.endsWith('.kodikplayer.com'))&&p==='/adsbygoogle.js')||(h.endsWith('yandex.ru')&&(p.startsWith('/watch/')||p.startsWith('/ads/adfox/')))||(h==='vidalak.com'&&p.startsWith('/api/vpaid'))||(h==='ssp.surfy.space'&&p.startsWith('/wrap/vpaid'))||(h==='cdn.jsdelivr.net'&&p.startsWith('/npm/yandex-metrica-watch/'))||(h==='kimberlite.io'&&p.startsWith('/rtb/bid/vast/'))||(h==='ipvertnet.com'&&p.startsWith('/vast3/'))||(h==='adx.stack.bidster.net'&&p.startsWith('/vast/'))||(h==='a.suprion.ru'&&(p.startsWith('/vast/')||p.startsWith('/static/vpaid/')))||(h==='bid.ctv.house'&&p.startsWith('/ads/'))||(h==='ad.moe.video'&&p.startsWith('/vast'))||(h.endsWith('.traffer.net')&&p.startsWith('/code/video-steam'))||(h==='vast.ufouxbwn.com'&&p==='/vast.php')||(h==='franecki.net'&&p.startsWith('/assets/vendor/')&&p.endsWith('.xml'));
+    if(ad&&!process.env.LUMA_NO_BLOCK){cb({cancel:true});return;}
+    if(win && d.webContentsId===win.webContents.id && kodikManifest(d.url)){
+      const frameUrl=d.frame?.url||'';if(process.env.LIFT_LOG)console.log('[kodik] manifest',!!frameUrl);try{const f=new URL(frameUrl);if(/^(?:[a-z0-9-]+\.)*kodikplayer\.com$/i.test(f.hostname))win.webContents.send('player:kodik-manifest',{url:d.url,frameUrl});}catch{}
+    }
+    cb({});
+  });
   createWindow();
   updater.warm();                           // проверка обновлений через 10 секунд после запуска
   setTimeout(() => tvApi.warm(), 4000);   // телепрограмма и плейлисты готовятся в фоне

@@ -40,16 +40,17 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
   }
   const valid = (o) => o && typeof o === 'object' && /^(Luma|Lift)$/.test(o.app || '') && o.data && typeof o.data === 'object';
 
-  const uniq = (list, key) => { const m = new Map(); for (const x of list) if (x && x[key] != null && !m.has(x[key])) m.set(x[key], x); return [...m.values()]; };
+  const mergeFavorites = (list) => {const m=new Map();for(const x of list)if(x&&x.id!=null){const id=String(x.id),old=m.get(id);if(!old||Number(x.at||0)>Number(old.at||0))m.set(id,x);}return [...m.values()];};
+  const mergeLists = (list) => { const m=new Map();for(const x of list)if(x&&x.url){const old=m.get(x.url);if(!old||Number(x.at||0)>Number(old.at||0))m.set(x.url,x);}return [...m.values()]; };
   function merge(cur, inc) {
     const out = { ...cur };
     for (const [k, v] of Object.entries(inc)) {
       if (EXCLUDE(k)) continue;
-      if (k === 'favs') out.favs = uniq([...(cur.favs || []), ...(v || [])], 'id');
-      else if (k === 'lists') out.lists = uniq([...(cur.lists || []), ...(v || [])], 'url');
+      if (k === 'favs') out.favs = mergeFavorites([...(cur.favs || []), ...(v || [])]);
+      else if (k === 'lists') out.lists = mergeLists([...(cur.lists || []), ...(v || [])]);
       else if (k === 'history') {
         const m = new Map();
-        for (const x of [...(cur.history || []), ...(v || [])]) { const o = m.get(x.id); if (!o || (x.ts || 0) > (o.ts || 0)) m.set(x.id, x); }
+        for (const x of [...(cur.history || []), ...(v || [])]) { if(!x||x.id==null)continue;const id=String(x.id),o = m.get(id); if (!o || (x.ts || 0) > (o.ts || 0)) m.set(id, x); }
         out.history = [...m.values()].sort((a, b) => (b.ts || 0) - (a.ts || 0)).slice(0, 60);
       } else if (k === 'seen') {
         out.seen = { ...(cur.seen || {}) };
@@ -57,6 +58,11 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
       } else if (k === 'done') { out.done = { ...(cur.done || {}) }; for (const [dk, arr] of Object.entries(v || {})) out.done[dk] = [...new Set([...(out.done[dk] || []), ...arr])];
       } else if (k === 'tvFav') out.tvFav = [...new Set([...(cur.tvFav || []), ...(v || [])])];
       else if (k === 'tvStats') { out.tvStats = { ...(cur.tvStats || {}) }; for (const [id, st] of Object.entries(v || {})) { const o = out.tvStats[id]; if (!o || (st.last || 0) > (o.last || 0)) out.tvStats[id] = { ...st, n: Math.max(st.n || 0, o ? o.n || 0 : 0), t: Math.max(st.t || 0, o ? o.t || 0 : 0) }; } }
+      else if (k === 'tvEpgLinks') { out.tvEpgLinks = { ...(cur.tvEpgLinks || {}) }; for (const [id, link] of Object.entries(v || {})) if (link && typeof link === 'object' && Number(link.ts || 0) > Number(out.tvEpgLinks[id]?.ts || 0)) out.tvEpgLinks[id] = link; }
+      else if (k === 'sourceHistory') { out.sourceHistory = { ...(cur.sourceHistory || {}) }; for (const [sk,sv] of Object.entries(v || {})) if (sv && (!out.sourceHistory[sk] || (sv.ts || 0) > (out.sourceHistory[sk].ts || 0))) out.sourceHistory[sk] = sv; }
+      else if (k === 'sportReminders') { if (v && typeof v === 'object' && !Array.isArray(v)) { out.sportReminders = { ...(cur.sportReminders || {}) }; for (const [id, item] of Object.entries(v)) if (item && typeof item === 'object' && !Array.isArray(item) && (!out.sportReminders[id] || Number(item.ts || 0) > Number(out.sportReminders[id].ts || 0))) out.sportReminders[id] = item; } }
+      else if (k === 'sportFollows') { if (v && typeof v === 'object' && !Array.isArray(v)) { out.sportFollows = { ...(cur.sportFollows || {}) }; for (const [id, item] of Object.entries(v)) if (item && typeof item === 'object' && !Array.isArray(item) && (!out.sportFollows[id] || Number(item.ts || 0) > Number(out.sportFollows[id].ts || 0))) out.sportFollows[id] = item; } }
+      else if (k === 'watchPrefs') { if (v && typeof v === 'object' && !Array.isArray(v)) { out.watchPrefs = { ...(cur.watchPrefs || {}) }; for (const [id, pref] of Object.entries(v)) if (pref && typeof pref === 'object' && !Array.isArray(pref) && (!out.watchPrefs[id] || Number(pref.ts || 0) > Number(out.watchPrefs[id].ts || 0))) out.watchPrefs[id] = pref; } }
       else if (k === 'progress') { out.progress = { ...(cur.progress || {}) }; for (const [pk, pv] of Object.entries(v || {})) if (!out.progress[pk] || (pv.ts || 0) > (out.progress[pk].ts || 0)) out.progress[pk] = pv; }
       else if (k === 'tvCustom') { const c = cur.tvCustom || []; out.tvCustom = [...c, ...(v || []).filter((e) => e && !c.some((x) => x.url && x.url === e.url))]; }
       else if (k === 'gone') { out.gone = { ...(cur.gone || {}) }; for (const [gk, gts] of Object.entries(v || {})) if (gts > (out.gone[gk] || 0)) out.gone[gk] = gts; }
@@ -69,6 +75,7 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
     if (Object.keys(gone).length) {
       out.gone = gone;
       if (out.favs) out.favs = out.favs.filter((f) => !(gone['f:' + f.id] > (f.at || 0)));
+      if (out.lists) out.lists = out.lists.filter((l) => !(gone['l:' + l.url] > (l.at || 0)));
       const prog = out.progress || cur.progress || {};   // был просмотр позже удаления: запись остаётся
       if (out.history) out.history = out.history.filter((h) => !(gone['h:' + h.id] > (h.ts || 0) && !Object.entries(prog).some(([k, p]) => k.startsWith(h.id + ':') && (p.ts || 0) > gone['h:' + h.id])));
     }

@@ -11,7 +11,7 @@ const ICONS = {
   film: '<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M7 4v16M17 4v16M3 9h4M3 15h4M17 9h4M17 15h4"/>',
   tv: '<rect x="3" y="5" width="18" height="12" rx="2"/><path d="M8 21h8M12 17v4"/>',
   cartoon: '<circle cx="12" cy="12" r="9"/><path d="M8 14s1.5 2.5 4 2.5S16 14 16 14M9 9.5h.01M15 9.5h.01"/>',
-  anime: '<path d="M12 3l2.2 5.3L20 9l-4.3 3.9L17 19l-5-3-5 3 1.3-6.1L4 9l5.8-.7z"/>',
+  anime: '<path d="M4.2 12.2V10a7.8 7.8 0 0 1 15.6 0v2.2M4.2 10.8c1.7-.1 3-1.4 3.8-3.6 1.1 2.1 3 3.2 5.3 3.4-1-1-1.5-2.1-1.6-3.5 1.2 2.4 3.8 3.7 8.1 3.7M5.3 10.6v3.5c0 3 2.6 5.5 6.7 7 4.1-1.5 6.7-4 6.7-7v-3.5M4.3 12.4c-1.2 1.8-1.1 4 .2 5.7M19.7 12.4c1.2 1.8 1.1 4-.2 5.7M8 12.6c.7-.7 1.8-.7 2.5 0M13.5 12.6c.7-.7 1.8-.7 2.5 0M9.2 13.4v.7M14.8 13.4v.7M10.5 17c1 .5 2 .5 3 0"/>',
   sport: '<circle cx="12" cy="12" r="9"/><path d="M12 8l3 2.2-1.2 3.5h-3.6L9 10.2zM12 3v5M3.6 9l5.4 1.2M20.4 9L15 10.2M7 19l3.2-5.3M17 19l-3.2-5.3"/>',
   show: '<path d="M4 8h16v11H4zM8 4l4 4 4-4"/>',
   search: '<circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>',
@@ -30,7 +30,7 @@ const ico = (n, cls = '') => `<svg viewBox="0 0 24 24" class="${cls}">${ICONS[n]
 
 const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
 // id карточек Luma — числа; у тайтлов Animeon — строка «ao:slug»
-const idOf = (raw) => String(raw).startsWith('ao:') ? String(raw) : +raw;
+const idOf = (raw) => /^-?\d+$/.test(String(raw)) ? Number(raw) : String(raw);
 const SEC_BY_TYPE = { 1: 'films', 2: 'cartoons', 3: 'series', 4: 'tvshows', 5: 'cartoons', 6: 'anime', 7: 'anime' };
 const TYPES = { 1: 'Фильм', 2: 'Мультфильм', 3: 'Сериал', 4: 'ТВ-шоу', 5: 'Мультсериал', 6: 'Аниме-фильм', 7: 'Аниме-сериал' };
 const SECTIONS = {
@@ -43,7 +43,7 @@ const SECTIONS = {
 };
 
 /* ================= состояние ================= */
-const state = { favs: [], history: [], seen: {}, lists: [], lbRecent: [], progress: {}, done: {}, watchPrefs: {}, playerVoicePrefs: {}, trackedPremieres: [], tvFav: [], tvStats: {}, tvPrefs: { scope: 'stable', vol: 1, muted: false }, tvLast: '', updSkip: '' };
+const state = { favs: [], history: [], seen: {}, lists: [], lbRecent: [], progress: {}, done: {}, watchPrefs: {}, sportFollows: {}, sportReminders: {}, sourceHistory: {}, playerVoicePrefs: {}, trackedPremieres: [], tvFav: [], tvStats: {}, tvEpgLinks: {}, tvPrefs: { scope: 'stable', vol: 1, muted: false }, tvLast: '', updSkip: '' };
 let store = {};
 async function initStore() {
   store = (await window.lift.getStore()) || {};
@@ -57,11 +57,15 @@ async function initStore() {
   state.torrRecent = store.torrRecent || {};
   state.done = store.done || {};
   state.watchPrefs = store.watchPrefs || {};
+  state.sportFollows = store.sportFollows && typeof store.sportFollows === 'object' && !Array.isArray(store.sportFollows) ? store.sportFollows : {};
+  state.sportReminders = store.sportReminders && typeof store.sportReminders === 'object' && !Array.isArray(store.sportReminders) ? store.sportReminders : {};
+  state.sourceHistory = store.sourceHistory || {};
   state.trackedPremieres = Array.isArray(store.trackedPremieres) ? store.trackedPremieres.filter(x=>Number.isSafeInteger(Number(x?.id))&&Number(x.id)>0&&x.title) : [];
   state.playerVoicePrefs = store.playerVoicePrefs && typeof store.playerVoicePrefs === 'object' && !Array.isArray(store.playerVoicePrefs) ? store.playerVoicePrefs : {};
   migrateDone();
   state.tvFav = store.tvFav || [];
   state.tvStats = store.tvStats || {};
+  state.tvEpgLinks = store.tvEpgLinks || {};
   state.tvPrefs = Object.assign({ scope: 'stable', vol: 1, muted: false }, store.tvPrefs || {});
   state.tvLast = store.tvLast || '';
   state.updSkip = store.updSkip || '';
@@ -111,7 +115,7 @@ function migrateDone() {
 // Animeon это slug, для Luma — их числовой id: так «Продолжить» не склеивает
 // разные релизы и возвращает к выбранной озвучке.
 const watchIdFor = (it, source = 'luma', ao = null) => it._aoCanonicalSlug ? `ao:${it._aoCanonicalSlug}` : ao?.slug ? `ao:${ao.slug}` : (String(it.id).startsWith('ao:') ? String(it.id) : it.id);
-const brief = (it, watch = null) => ({ id: watch?.id ?? it.id, routeId: it.id, source: watch?.source || 'luma', voice: watch?.voice || '', aoSlug: watch?.aoSlug || '', rutubeId:watch?.rutubeId || '', rutubeDuration:watch?.rutubeDuration || 0, type: it.type, name: it.name, origin_name: it.origin_name, poster: it.poster, year: it.year, kp: it.kp_rating, imdb: it.imdb_rating, shikimori_rating:it.shikimori_rating, quality: it.quality });
+const brief = (it, watch = null) => ({ id: watch?.id ?? it.id, routeId: it.id, source: watch?.source || 'luma', voice: watch?.voice || '', aoSlug: watch?.aoSlug || '', rutubeId:watch?.rutubeId || '', vkId:watch?.vkId || '', rutubeDuration:watch?.rutubeDuration || 0, type: it.type, name: it.name, origin_name: it.origin_name, poster: it.poster, year: it.year, kp: it.kp_rating, imdb: it.imdb_rating, shikimori_rating:it.shikimori_rating, quality: it.quality });
 const voiceKey = v => String(v || '').trim().replace(/\s+/g, ' ').toLocaleLowerCase('ru-RU');
 const findVoice = (available, requested) => (available || []).find(v => voiceKey(v) === voiceKey(requested));
 // Torrent track labels often include additional descriptions, so accept a
@@ -131,14 +135,22 @@ function preferredPlayerVoice(available, favorites) {
 }
 // Настройки просмотра принадлежат конкретному тайтлу. Режим «Авто» предпочитает
 // собственный AnimeOn 2.0, но сохраняет Luma/внешний плеер как резерв.
+function animeonEpisodeSources(ao, episode, requestedVoice, wants2) {
+  const ep=String(episode || ao?.episodes?.[0] || 1);
+  const reserve=(ao?.voiceNames || []).filter(v=>ao?.voices?.[v]?.[ep]);
+  const hosted=Array.isArray(ao?.selfHosted?.translations?.[ep]) ? ao.selfHosted.translations[ep].filter(v=>typeof v==='string'&&v.trim()) : [];
+  const nativeVoice=wants2?(findVoice(hosted,requestedVoice)||hosted.find(v=>v!=='jap')||hosted[0]||''):'';
+  const reserveVoice=findVoice(reserve,requestedVoice)||reserve[0]||'';
+  return {ep,hosted,reserve,nativeVoice,reserveVoice};
+}
 function getWatchPref(it, ao, native = false) {
   const key = ao?.slug ? `ao:${ao.slug}` : String(it.id);
   const saved = state.watchPrefs[key] || {};
-  const first = String(ao?.episodes?.[0] ?? 1);
+  const first = String(ao?.episodes?.[0] ?? ao?.selfHosted?.episodes?.[0] ?? 1);
   const legacyVoice = (() => { try { return localStorage.getItem('ao.voice') || ''; } catch { return ''; } })();
-  const options = (ao?.voiceNames || []).filter(v => ao.voices[v]?.[first]);
-  const voice = findVoice(options, saved.voice) || findVoice(options, legacyVoice) || options[0] || ao?.voiceNames?.[0] || '';
-  // Миграция прежней настройки «Luma / Animeon» без потери выбора пользователя.
+  const sources=animeonEpisodeSources(ao,first,saved.voice||legacyVoice,true);
+  const options=[...new Set([...sources.hosted,...sources.reserve])];
+  const voice=findVoice(options,saved.voice)||findVoice(options,legacyVoice)||sources.nativeVoice||sources.reserveVoice||'';
   const mode = ['auto', 'animeon2', 'reserve'].includes(saved.mode) ? saved.mode
     : saved.src === 'animeon' ? 'animeon2' : saved.src === 'luma' ? 'reserve' : 'auto';
   return { mode, voice };
@@ -190,7 +202,7 @@ function addHistory(it, season, episode, watch = null) {
     h.id = newId; h.routeId = newId; h.season = '1';
     persist('progress'); persist('seen'); persist('done');
   }
-  state.history = state.history.filter((h) => h.id !== item.id);
+  state.history = state.history.filter((h) => String(h.id) !== String(item.id));
   state.history.unshift({ ...item, season, episode, ts: Date.now() });
   state.history = state.history.slice(0, 60);
   persist('history');
@@ -225,8 +237,9 @@ function aoToLuma(c) {
   const serial = c.episodes.length > 1 || c.type === 7;
   const v0 = c.voiceNames[0];
   const firstLink = v0 ? (c.voices[v0][String(c.episodes[0] ?? 1)] || Object.values(c.voices[v0])[0]) : '';
+  const canonical=/\[(?:ТВ|TV)[-\s]*1\]/i.test(c.title||'')?c.franchise?.nodes?.find(x=>String(x.id)===String(c.franchise.currentId))?.name:'';
   return {
-    id: 'ao:' + c.slug, type: c.type, name: c.title, origin_name: c.titleOrig,
+    id: 'ao:' + c.slug, type: c.type, name: canonical||c.title, origin_name: c.titleOrig,
     poster: c.poster, year: c.year, kp_rating: c.kpRating || 0, imdb_rating: c.imdbRating, shikimori_rating:c.rating || 0,
     episodes: serial && c.episodes.length ? { 1: c.episodes } : {},
     iframe_uri: firstLink || '',
@@ -267,6 +280,12 @@ function ambient(url) {
 }
 
 const CARD_ACTIONS = new Map();
+function playDirectSourceCard(item) {
+  const id=String(item?.id||'');
+  if (/^vk:-?\d+_\d+$/.test(id)) { playItem({...item,info:{}},[],null,null,{vkVideo:{id:id.slice(3)}}); return true; }
+  if (/^rutube:[a-f\d]{32}$/i.test(id)) { playItem({...item,info:{}},[],null,null,{rutubeVideo:{id:id.slice(7),duration:item.rutubeDuration||0}}); return true; }
+  return false;
+}
 function cardHTML(it, i = 0, opts = {}) {
   const r = opts.imdbFirst ? (Number(it.imdb_rating) || rating(it)) : rating(it);
   const q = it.quality;
@@ -274,7 +293,7 @@ function cardHTML(it, i = 0, opts = {}) {
   const sub = opts.sub || [it.year, TYPES[it.type]].filter(Boolean).join(' · ');
   const routeId = isAnime(it) && it.aoSlug ? `ao:${it.aoSlug}` : it.id;
   CARD_ACTIONS.set(String(routeId),{...it,id:routeId}); if(CARD_ACTIONS.size>3000)CARD_ACTIONS.delete(CARD_ACTIONS.keys().next().value);
-  return `<div class="card" data-id="${esc(routeId)}" style="--i:${i}">
+  return `<div class="card${/^(?:vk|rutube):/.test(String(routeId)) ? ' video-thumb' : ''}" data-id="${esc(routeId)}" style="--i:${i}">
     <div class="poster">
       ${r ? `<span class="badge r ${rateClass(r)}">${r.toFixed(1)}</span>` : ''}
       ${q && q !== 'FHD' && q !== 'HD' ? `<span class="badge q">${esc(q)}</span>` : ''}
@@ -403,6 +422,15 @@ document.addEventListener('error', (e) => {
   const alt = img.dataset.alt;
   if (alt && !img.dataset.tried) { img.dataset.tried = '1'; img.src = alt; return; }
   const holder = img.closest('.poster, .det-poster');
+  const card=img.closest('.card');
+  if(card && /^\d+$/.test(card.dataset.id||'') && !img.dataset.detailPoster){
+    img.dataset.detailPoster='1';const original=img.currentSrc||img.src;
+    window.lift.api('/info/'+encodeURIComponent(card.dataset.id),600000).then(d=>{if(!img.isConnected)return;if(d?.poster&&d.poster!==original){img.src=d.poster;return;}img.src='data:image/png;base64,invalid';}).catch(()=>{if(img.isConnected)img.src='data:image/png;base64,invalid';});return;
+  }
+  if(card && /^\d+$/.test(card.dataset.id||'') && img.dataset.detailPoster && !img.dataset.tmdbPoster){
+    img.dataset.tmdbPoster='1';const item=CARD_ACTIONS.get(String(card.dataset.id));
+    if(item){window.lift.tmdbFind({name:item.name,origin_name:item.origin_name,year:item.year,type:item.type}).then(t=>{if(!img.isConnected)return;if(t?.poster){img.src=TMG(t.poster,'w342');return;}const name=card.querySelector('.t')?.textContent||'';img.remove();holder?.classList.add('nopic');holder?.insertAdjacentHTML('afterbegin',`<div class="ph-title">${esc(name)}</div>`);}).catch(()=>{if(!img.isConnected)return;img.remove();holder?.classList.add('nopic');});return;}
+  }
   if (holder) {
     const name = img.closest('.card')?.querySelector('.t')?.textContent || img.alt || '';
     img.remove(); holder.classList.add('nopic');
@@ -443,7 +471,7 @@ async function render(route) {
   stopHomeRails();
   stopHero();
   stopDetailTrailer();
-  if (typeof tvStop === 'function') tvStop();   // остановить телеканал при уходе со страницы
+  if (typeof tvStop === 'function' && !tvPreservePip()) tvStop();   // отдельное окно канала продолжает работать при навигации
   view.style.transition = 'opacity .15s'; view.style.opacity = 0;
   await wait(120);
   if (token !== navToken) return;
@@ -477,16 +505,29 @@ function buildNav() {
 function updateBadges() { const c = $('#favCount'); if (c) c.textContent = state.favs.length || ''; if (c) c.style.display = state.favs.length ? '' : 'none'; }
 function activityEntries() {
   const entries = [
-    ...state.history.filter(h => h.ts).map(h => ({time:new Date(h.ts).getTime(),title:h.name,poster:h.poster,label:h.season && h.episode ? `Открыта серия ${h.aoSlug ? h.episode : h.season+'×'+h.episode}` : 'Открыт для просмотра',id:h.aoSlug ? `ao:${h.aoSlug}` : h.routeId || h.id})),
-    ...state.favs.filter(f => f.at).map(f => ({time:new Date(f.at).getTime(),title:f.name,poster:f.poster,label:'Добавлено в избранное',id:f.aoSlug ? `ao:${f.aoSlug}` : f.routeId || f.id}))
+    ...state.history.filter(h => h.ts).map(h => ({kind:'watch',time:new Date(h.ts).getTime(),title:h.name,poster:h.poster,label:h.season && h.episode ? `Открыта серия ${h.aoSlug ? h.episode : h.season+'×'+h.episode}` : 'Открыт для просмотра',id:h.aoSlug ? `ao:${h.aoSlug}` : h.routeId || h.id})),
+    ...state.favs.filter(f => f.at).map(f => ({kind:'favorite',time:new Date(f.at).getTime(),title:f.name,poster:f.poster,label:'Добавлено в избранное',id:f.aoSlug ? `ao:${f.aoSlug}` : f.routeId || f.id}))
   ];
   return entries.filter(x=>Number.isFinite(x.time) && x.title && x.id != null).sort((a,b)=>b.time-a.time);
 }
-function renderActivity(view) {
-  const entries=activityEntries();
-  view.innerHTML=`<div class="page-head"><h1>Недавняя активность</h1><p class="sub">Последние записи из истории просмотра и текущего избранного Luma.</p></div>${entries.length ? `<div class="notice-list activity-list">${entries.map(x=>`<button class="notice-item" data-activity-entry="${esc(x.id)}">${x.poster ? `<img loading="lazy" src="${esc(x.poster)}" alt="">` : ''}<span><b>${esc(x.title)}</b><small>${esc(x.label)}</small><small>${esc(new Date(x.time).toLocaleString('ru-RU',{day:'numeric',month:'long',year:'numeric',hour:'2-digit',minute:'2-digit'}))}</small></span></button>`).join('')}</div>` : '<div class="empty"><h3>Пока здесь тихо</h3>Откройте тайтл или добавьте его в избранное.</div>'}`;
-  view.onclick=e=>{const item=e.target.closest('[data-activity-entry]');if(item)go({name:'details',id:idOf(item.dataset.activityEntry)});};
+function libraryHeader(title, description, count, caption) {
+  return `<header class="catalog-intro catalog-intro-library library-intro"><div class="catalog-intro-copy"><span class="catalog-eyebrow">LUMA <i></i> МОЯ БИБЛИОТЕКА</span><h1>${esc(title)}</h1><p>${esc(description)}</p></div><div class="library-count"><b>${Number(count)||0}</b><span>${esc(caption)}</span></div></header>`;
 }
+function libraryEmpty(title, message) {
+  return `<div class="library-empty"><span class="library-empty-icon" aria-hidden="true">${ico('film')}</span><h2>${esc(title)}</h2><p>${esc(message)}</p><button class="btn ghost" data-library-catalog>Открыть каталог →</button></div>`;
+}
+function wireLibraryCatalog(view) { view.querySelector('[data-library-catalog]')?.addEventListener('click',()=>go({name:'section',key:'films'})); }
+function renderActivity(view) {
+  const entries=activityEntries(), groups=new Map();
+  for(const item of entries){const date=new Date(item.time),key=[date.getFullYear(),date.getMonth(),date.getDate()].join('-');if(!groups.has(key))groups.set(key,{date,items:[]});groups.get(key).items.push(item);}
+  const today=new Date(),start=new Date(today.getFullYear(),today.getMonth(),today.getDate()),yesterday=new Date(today.getFullYear(),today.getMonth(),today.getDate()-1);
+  const dateLabel=date=>{const day=new Date(date.getFullYear(),date.getMonth(),date.getDate()).getTime();return day===start.getTime()?'Сегодня':day===yesterday.getTime()?'Вчера':date.toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:date.getFullYear()===today.getFullYear()?undefined:'numeric'});};
+  const card=x=>`<button class="activity-card" data-activity-entry="${esc(x.id)}"><span class="activity-art"><span class="activity-art-fallback" aria-hidden="true">${ico('film')}</span>${x.poster?`<img loading="lazy" src="${esc(x.poster)}" alt="" onerror="this.remove()">`:''}</span><span class="activity-card-main"><span class="activity-kind ${x.kind==='favorite'?'is-favorite':''}">${x.kind==='favorite'?'ИЗБРАННОЕ':'ПРОСМОТР'}</span><b class="activity-card-title">${esc(x.title)}</b><span class="activity-card-label">${esc(x.label)}</span></span><span class="activity-card-side"><time datetime="${new Date(x.time).toISOString()}">${esc(new Date(x.time).toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'}))}</time><span class="activity-card-arrow" aria-hidden="true">↗</span></span></button>`;
+  view.innerHTML=`${libraryHeader('Недавняя активность','История просмотра и добавления в избранное.',entries.length,'событий')}<div class="library-section-head activity-section-title"><div><h2>Последние действия</h2><p>Просмотры и сохранённые истории в одном месте</p></div></div>${entries.length?`<div class="activity-groups">${[...groups.values()].map(group=>`<section class="activity-group"><div class="activity-group-heading"><h3>${esc(dateLabel(group.date))}</h3><span>${group.items.length}</span></div><div class="activity-cards">${group.items.map(card).join('')}</div></section>`).join('')}</div>`:libraryEmpty('Пока здесь тихо','Откройте тайтл или добавьте его в избранное — он появится здесь.')}`;
+  wireLibraryCatalog(view);
+  view.onclick=e=>{const item=e.target.closest('[data-activity-entry]');if(item){const id=item.dataset.activityEntry,entry=state.history.find(h=>String(h.routeId||h.id)===id)||state.favs.find(f=>String(f.routeId||f.id)===id);if(!playDirectSourceCard(entry))go({name:'details',id:idOf(id)});}};
+}
+
 let notifications = [], notificationSnapshot = {}, notificationsChecking = false;
 function updateNotificationBadge() {
   const count = notifications.filter((n) => !n.read).length;
@@ -643,14 +684,16 @@ function renderNotifications(view) {
   }
   const airings = [...upcoming.values()].sort((a, b) => a.at - b.at);
   const pastPremieres=state.trackedPremieres.filter(item=>{const day=localReleaseDay(item.date);return day===null||day<today.getTime();});
+  const tvReminders=tvActiveReminders();
   const unread=notifications.filter(n=>!n.read).length;
   const dateLabel = n => new Date(n.at).toLocaleString('ru-RU',n.dateOnly ? {day:'numeric',month:'long'} : {day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'});
   const image = (url,title) => url ? `<img src="${esc(url)}" alt="" loading="lazy">` : `<span class="nc-poster-placeholder">${esc(String(title||'?').slice(0,1))}</span>`;
   view.innerHTML = `<div class="nc-page">
-    <header class="nc-header"><div><span class="nc-eyebrow">ВАША БИБЛИОТЕКА</span><h1>Уведомления</h1><p>Новые серии и премьеры, которые вы ждёте</p></div><div class="nc-header-actions">${unread ? '<button class="btn ghost" id="noticeReadAll">Прочитать все</button>' : ''}<button class="btn ghost nc-refresh" id="noticeRefresh" ${notificationsChecking?'disabled':''}><span aria-hidden="true">↻</span> ${notificationsChecking?'Проверяем…':'Обновить'}</button></div></header>
+    <header class="nc-header catalog-intro"><div class="catalog-intro-copy"><span class="catalog-eyebrow">LUMA <i></i> МОЯ БИБЛИОТЕКА</span><h1>Уведомления</h1><p>Новые серии и премьеры, которые вы ждёте.</p></div><div class="nc-header-actions">${unread ? '<button class="btn ghost" id="noticeReadAll">Прочитать все</button>' : ''}<button class="btn ghost nc-refresh" id="noticeRefresh" ${notificationsChecking?'disabled':''}><span aria-hidden="true">↻</span> ${notificationsChecking?'Проверяем…':'Обновить'}</button></div></header>
     <div class="nc-layout"><main class="nc-main">
       <section class="nc-section"><div class="nc-section-head"><div><span class="nc-section-kicker">НЕ ПРОПУСТИТЕ</span><h2>Скоро выйдут</h2></div><span class="nc-count">${airings.length}</span></div>
       ${airings.length ? `<div class="nc-airings">${airings.map(n=>`<button class="nc-airing" ${n.slug?`data-upcoming="${esc(n.slug)}"`:n.premiereId?`data-premiere="${n.premiereId}"`:`data-upcoming-route="${n.routeId}"`}><span class="nc-poster">${image(n.poster,n.title)}</span><span class="nc-airing-content"><span class="nc-date">${esc(dateLabel(n))}</span><b>${esc(n.title)}</b><small>${n.dateOnly ? (n.kind==='movie'?'Премьера':`${esc(n.season)} сезон · ${esc(n.episode)} серия`) : 'Следующая серия'}</small><span class="nc-source">${esc(n.source)}</span></span><span class="nc-arrow" aria-hidden="true">↗</span></button>`).join('')}</div><p class="nc-footnote">Дата эфира может отличаться от появления озвучки.</p>` : '<div class="nc-empty-small"><b>Пока нет ближайших дат</b><span>Добавьте сериал в избранное или начните просмотр.</span></div>'}</section>
+      ${tvReminders.length?`<section class="nc-section"><div class="nc-section-head"><div><span class="nc-section-kicker">ТЕЛЕПРОГРАММА</span><h2>Напоминания о передачах</h2></div></div><div class="nc-feed">${tvReminders.map((item,i)=>`<button class="nc-event" data-tv-reminder-remove="${i}" aria-label="Отменить напоминание: ${esc(item.title)}"><span class="nc-event-poster">${image('',item.channelName)}</span><span class="nc-event-content"><b>${esc(item.title)}</b><span>${esc(item.channelName)} · ${esc(new Date(item.startsAt).toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}))}</span><small>Отменить напоминание</small></span></button>`).join('')}</div></section>`:''}
       <section class="nc-section"><div class="nc-section-head"><div><span class="nc-section-kicker">СОБЫТИЯ</span><h2>Лента</h2></div>${unread?`<span class="nc-unread">${unread} новых</span>`:''}</div>
       ${notifications.length ? `<div class="nc-feed">${notifications.map((n,i)=>`<button class="nc-event ${n.read?'':'is-new'}" data-notice="${i}"><span class="nc-event-poster">${image(n.poster,n.title)}</span><span class="nc-event-content"><b>${esc(n.title)}</b><span>${esc(n.text)}</span><small>${esc(new Date(n.at).toLocaleString('ru-RU',{day:'numeric',month:'long',hour:'2-digit',minute:'2-digit'}))}</small></span>${n.read?'':'<i class="nc-dot" aria-label="Новое"></i>'}</button>`).join('')}</div>` : '<div class="nc-empty-feed"><div class="nc-empty-icon">✦</div><div><b>Пока всё спокойно</b><span>Здесь появятся новости о сериях и премьерах из вашей библиотеки.</span></div></div>'}</section>
       ${pastPremieres.length ? `<section class="nc-section"><div class="nc-section-head"><div><span class="nc-section-kicker">ВАШ СПИСОК</span><h2>Отслеживаемые премьеры</h2></div></div><div class="nc-feed">${pastPremieres.map(item=>`<button class="nc-event" data-premiere="${Number(item.id)}"><span class="nc-event-poster">${image(item.poster?TMG(item.poster,'w342'):'',item.title)}</span><span class="nc-event-content"><b>${esc(item.title)}</b><small>Дата премьеры: ${esc(item.date||'неизвестна')} · TMDB</small></span></button>`).join('')}</div></section>` : ''}
@@ -680,10 +723,13 @@ function renderNotifications(view) {
     if (upcomingButton) { go({ name:'details', id:`ao:${upcomingButton.dataset.upcoming}` }); return; }
     const upcomingRoute = e.target.closest('[data-upcoming-route]');
     if (upcomingRoute) { go({name:'details',id:Number(upcomingRoute.dataset.upcomingRoute)}); return; }
+    const tvReminderRemove=e.target.closest('[data-tv-reminder-remove]');if(tvReminderRemove){const item=tvReminders[Number(tvReminderRemove.dataset.tvReminderRemove)];if(item){sportRemoveReminder(item);renderNotifications(view);}return;}
     const button = e.target.closest('[data-notice]'); if (!button) return;
     const notice = notifications[Number(button.dataset.notice)]; if (!notice) return;
     notice.read = true; window.lift.setStore('lumaNotifications', notifications); updateNotificationBadge();
-    if(notice.premiereId)go({name:'premiere',id:Number(notice.premiereId)});
+    if(notice.tvReminder)go({name:'tv',scope:notice.tvReminder.scope||'all',ch:notice.tvReminder.channelId});
+    else if(notice.sportReminder)go({name:'sport',panel:'calendar',league:notice.sportReminder.league,date:notice.sportReminder.date});
+    else if(notice.premiereId)go({name:'premiere',id:Number(notice.premiereId)});
     else go({ name: 'details', id: notice.routeId || `ao:${notice.slug}` });
   };
 }
@@ -696,7 +742,7 @@ async function renderPremiere(view,route,alive) {
   if(!item){view.innerHTML='<div class="empty"><h3>Не удалось загрузить фильм</h3>Попробуйте позже.</div>';return;}
   const day=localReleaseDay(item.date), today=new Date();today.setHours(0,0,0,0);
   const date=day===null?'Дата неизвестна':new Date(day).toLocaleDateString('ru-RU',{day:'numeric',month:'long',year:'numeric'});
-  view.innerHTML=`<div class="premiere-detail">${item.poster?`<img class="premiere-detail-poster" src="${esc(TMG(item.poster,'w500'))}" alt="">`:''}<div><div class="det-type">Премьера · TMDB</div><h1>${esc(item.title)}</h1>${item.origin&&item.origin!==item.title?`<p class="sub">${esc(item.origin)}</p>`:''}<p><b>${esc(date)}</b> · дата премьеры по TMDB</p><p class="hint">Доступность для просмотра может отличаться от даты премьеры.</p>${item.overview?`<p class="premiere-overview">${esc(item.overview)}</p>`:''}<div class="row-btns"><button class="btn primary" id="premiereToggle"></button><button class="btn ghost" id="premiereLookup">Найти в Luma</button></div><p class="hint" id="premiereLookupStatus"></p></div></div>`;
+  view.innerHTML=`<section class="premiere-detail catalog-intro"><div class="premiere-detail-poster">${item.poster?`<img src="${esc(TMG(item.poster,'w500'))}" alt="">`:`<span aria-hidden="true">${esc((item.title||'?')[0])}</span>`}</div><div class="premiere-detail-copy"><div class="catalog-eyebrow">ПРЕМЬЕРА <i></i> TMDB</div><h1>${esc(item.title)}</h1>${item.origin&&item.origin!==item.title?`<p class="premiere-original">${esc(item.origin)}</p>`:''}<div class="premiere-date"><span>ДАТА ПРЕМЬЕРЫ</span><strong>${esc(date)}</strong></div>${item.overview?`<p class="premiere-overview">${esc(item.overview)}</p>`:''}<div class="row-btns"><button class="btn primary" id="premiereToggle"></button><button class="btn ghost" id="premiereLookup">Найти в Luma</button></div><p class="premiere-note">Доступность для просмотра может отличаться от даты премьеры.</p><p class="hint" id="premiereLookupStatus" role="status"></p></div></section>`;
   const toggle=$('#premiereToggle',view);
   const updateToggle=()=>{toggle.textContent=saved()?'Не отслеживать':'Отслеживать';toggle.disabled=!saved()&&(day===null||day<today.getTime());};
   updateToggle();
@@ -744,8 +790,10 @@ const STREAM_PLATFORMS = [
   {id:117,name:'Кинопоиск',brand:'Кинопоиск',region:'RU'}, {id:115,name:'Okko',brand:'okko',region:'RU'}, {id:570,name:'PREMIER',brand:'PREMIER',region:'RU'}
 ];
 const PLATFORM_LOGOS = {8:'netflix.svg',9:'primevideo.svg',337:'disneyplus.svg',15:'hulu.svg',1899:'hbo.svg',531:'paramountplus.svg',350:'appletv.svg',283:'crunchyroll.svg',117:'kinopoisk.svg',115:'okko.svg',570:'premier.png'};
-function platformRequest(p, kind='movie', extra={}) {
-  return window.lift.tmdbList(`/discover/${kind}`, {with_watch_providers:String(p.id),watch_region:p.region,sort_by:'popularity.desc',...extra},kind);
+const PLATFORM_ORIGINALS={8:{tv:213,movie:178464},9:{tv:1024,movie:210099},337:{tv:2739,movie:2},1899:{tv:49,movie:3268},15:{tv:453},531:{tv:4330},350:{tv:2552,movie:194232},283:{tv:1112,movie:198847},117:{tv:293648,movie:293648},115:{tv:175169,movie:175169},570:{tv:2859}};
+async function platformRequest(p, kind='movie', extra={}) {
+  const curated=await window.LumaOriginals.query(p.id,kind,extra,{search,info});if(curated)return curated;
+  const original=PLATFORM_ORIGINALS[p.id]?.[kind];if(!original)return {items:[],unsupported:true};const filter={[kind==='tv'&&![117,115].includes(p.id)?'with_networks':'with_companies']:String(original)};return window.lift.tmdbList(`/discover/${kind}`, { ...filter,sort_by:'popularity.desc',...extra},kind);
 }
 function platformStrip() {
   return `<section class="platform-strip" aria-label="Подборки платформ"><button class="platform-arrow platform-prev" aria-label="Прокрутить влево">‹</button><div class="platform-track">${STREAM_PLATFORMS.map(p=>`<button data-platform="${p.id}" aria-label="Подборка ${esc(p.name)}">${PLATFORM_LOGOS[p.id] ? `<img src="assets/platforms/${PLATFORM_LOGOS[p.id]}" alt="">` : `<span>${esc(p.brand)}</span>`}</button>`).join('')}</div><button class="platform-arrow platform-next" aria-label="Прокрутить вправо">›</button></section>`;
@@ -759,21 +807,34 @@ function wirePlatformStrip(root) {
 }
 async function renderPlatform(view, route, alive) {
   const p=STREAM_PLATFORMS.find(x=>x.id===Number(route.id)); if(!p){view.innerHTML='<div class="empty">Подборка не найдена</div>';return;}
-  view.innerHTML=`<div class="page-head"><div class="det-type">ПОДБОРКА ПЛАТФОРМЫ</div><h1>${esc(p.name)}</h1><p class="sub">Доступность в каталоге ${esc(p.name)} по данным TMDB для ${p.region === 'RU' ? 'России' : 'США'}. Для просмотра используйте источники Luma.</p></div><div class="platform-filters"><div class="seg platform-types"><button class="on" data-kind="movie">Фильмы</button><button data-kind="tv">Сериалы</button></div><select id="platformGenre" aria-label="Жанр"><option value="">Все жанры</option><option value="28">Боевик</option><option value="35">Комедия</option><option value="18">Драма</option><option value="27">Ужасы</option><option value="10749">Мелодрама</option><option value="16">Мультфильмы</option></select><select id="platformYear" aria-label="Год"><option value="">Все годы</option>${Array.from({length:30},(_,i)=>new Date().getFullYear()-i).map(y=>`<option>${y}</option>`).join('')}</select><select id="platformSort" aria-label="Сортировка"><option value="popularity.desc">Популярные</option><option value="vote_average.desc">По рейтингу</option><option value="primary_release_date.desc">Новинки</option></select></div><div class="grid" id="platformGrid"></div><div class="more"><button class="btn ghost" id="platformMore">Показать ещё</button></div>`;
-  let kind='movie', page=0, generation=0, busy=false;
+  view.innerHTML=`<div class="platform-page" data-platform-brand="${p.id}"><section class="platform-hero"><div class="platform-art" aria-hidden="true"></div><div class="platform-hero-copy"><div class="platform-eyebrow"><span></span> КОЛЛЕКЦИЯ LUMA</div><div class="platform-brand"><img src="assets/platforms/${esc(PLATFORM_LOGOS[p.id])}" alt="${esc(p.name)}"></div><p>Фильмы и сериалы платформы, которые можно найти в Luma.</p></div></section><section class="platform-catalog"><div class="platform-catalog-head"><div><h2 id="platformTitle">В коллекции</h2></div><div class="seg platform-types" aria-label="Тип контента"><button class="on" data-kind="all" aria-pressed="true">Все</button><button data-kind="movie" aria-pressed="false">Фильмы</button><button data-kind="tv" aria-pressed="false">Сериалы</button></div></div><div class="platform-filters"><select id="platformGenre" aria-label="Жанр"><option value="">Все жанры</option><option value="28">Боевик</option><option value="35">Комедия</option><option value="18">Драма</option><option value="27">Ужасы</option><option value="10749">Мелодрама</option><option value="16">Мультфильмы</option></select><select id="platformYear" aria-label="Год"><option value="">Все годы</option>${Array.from({length:30},(_,i)=>new Date().getFullYear()-i).map(y=>`<option>${y}</option>`).join('')}</select><select id="platformSort" aria-label="Сортировка"><option value="popularity.desc">Популярные</option><option value="vote_average.desc">По рейтингу</option><option value="primary_release_date.desc">Новинки</option></select></div><div class="grid" id="platformGrid"></div><div class="more platform-more" id="platformMore" role="status" aria-live="polite"></div><p class="platform-source">Загружаем коллекцию…</p></section></div>`;
+  let kind='all', generation=0, busy=false, states={}, shown=new Set(), platformObserver, emptyPages=0;
   const grid=view.querySelector('#platformGrid'), more=view.querySelector('#platformMore');
   async function load(reset=false) {
-    if(busy&&!reset)return; const token=++generation;if(reset){page=0;grid.innerHTML='';} busy=true;more.disabled=true;
-    const params={page:String(++page)}, genre=view.querySelector('#platformGenre').value, year=view.querySelector('#platformYear').value;
-    let sort=view.querySelector('#platformSort').value; if(kind==='tv'&&sort==='primary_release_date.desc')sort='first_air_date.desc';params.sort_by=sort;
-    if(genre)params.with_genres=genre;if(year)params[kind==='movie'?'primary_release_year':'first_air_date_year']=year;if(sort==='vote_average.desc')params['vote_count.gte']='100';
-    const result=await platformRequest(p,kind,params).catch(()=>({error:'NETWORK'})); if(!alive()||token!==generation)return;busy=false;more.disabled=false;
-    const items=(result.items||[]).map(x=>({...x.item,alt:x.poster}));if(items.length){const tmp=document.createElement('div');tmp.innerHTML=items.map((x,i)=>cardHTML(x,i)).join('');grid.append(...tmp.children);wireCards(grid);}else if(page===1)grid.innerHTML=`<div class="empty" style="grid-column:1/-1"><h3>${result.error?'Подборка временно недоступна':'Совпадения не найдены'}</h3>Попробуйте изменить фильтры или проверить связь с TMDB.</div>`;
-    more.hidden=!!result.error||page>=20;
+    if(busy&&!reset)return; const token=++generation;
+    if(reset){states={movie:{page:0,done:false},tv:{page:0,done:false}};shown=new Set();emptyPages=0;grid.innerHTML='';}else grid.querySelector('.platform-load-error')?.remove();
+    platformObserver?.unobserve(more);busy=true;more.hidden=false;more.innerHTML='<div class="spin" aria-label="Загружаем"></div>';
+    const genre=view.querySelector('#platformGenre').value,year=view.querySelector('#platformYear').value,sort=view.querySelector('#platformSort').value;
+    const kinds=kind==='all'?['movie','tv']:[kind];
+    const results=await Promise.all(kinds.map(async k=>{
+      const state=states[k];if(state.done)return {k,items:[],done:true};
+      const params={page:String(state.page+1),sort_by:k==='tv'&&sort==='primary_release_date.desc'?'first_air_date.desc':sort};
+      if(genre)params.with_genres=genre;if(year)params[k==='movie'?'primary_release_year':'first_air_date_year']=year;if(sort==='vote_average.desc')params['vote_count.gte']='100';
+      let result,attempts=0;do{result=await platformRequest(p,k,params).catch(()=>({error:'NETWORK'}));if(result.error||result.items?.length||!result.hasMore||attempts++>=3)break;params.page=String(Number(params.page)+1);}while(true);
+      return {k,...result,page:Number(params.page)};
+    }));
+    if(!alive()||token!==generation){if(!alive())platformObserver?.disconnect();return;}busy=false;
+    for(const r of results){if(!r.error){states[r.k].page=r.page||states[r.k].page;states[r.k].done=!!r.unsupported||r.hasMore===false||(r.hasMore===undefined&&states[r.k].page>=20);}}
+    const lists=results.map(r=>r.items||[]),items=[];for(let i=0;i<Math.max(0,...lists.map(x=>x.length));i++)for(const list of lists){const x=list[i];if(x&&!shown.has(String(x.item.id))){shown.add(String(x.item.id));items.push({...x.item,alt:x.poster});}}
+    if(items.length){const art=view.querySelector('.platform-art');if(art&&!art.childElementCount)art.innerHTML=items.filter(x=>x.poster).slice(0,5).map(x=>`<img src="${esc(x.poster)}" alt="" onerror="this.remove()">`).join('');const tmp=document.createElement('div');tmp.innerHTML=items.map((x,i)=>cardHTML(x,i)).join('');grid.append(...tmp.children);wireCards(grid);}
+    const failed=results.some(r=>r.error);if(failed){const error=document.createElement('div');error.className='empty platform-load-error';error.style.gridColumn='1/-1';error.innerHTML='<h3>Не удалось загрузить часть коллекции</h3><p>Проверьте соединение и повторите попытку.</p><button class="btn ghost" data-platform-retry>Повторить</button>';grid.append(error);}else if(!grid.querySelector('.card')&&kinds.every(k=>states[k].done))grid.innerHTML='<div class="empty" style="grid-column:1/-1"><h3>Совпадения не найдены</h3>Попробуйте изменить фильтры.</div>';
+    const subtitle=view.querySelector('.platform-source');if(subtitle)subtitle.textContent='Источники: TMDB и открытые каталоги оригиналов. Списки могут быть неполными; порядок — в пределах загруженной страницы.';
+    const done=kinds.every(k=>states[k].done);more.hidden=failed||done;more.innerHTML='';emptyPages=items.length?0:emptyPages+1;if(!failed&&!done){if(emptyPages>=3){more.innerHTML='<button class="btn ghost" data-platform-continue>Продолжить поиск</button>';more.querySelector('button').onclick=()=>{emptyPages=0;load();};}else platformObserver.observe(more);}
   }
-  const genreOptions={movie:[['','Все жанры'],['28','Боевик'],['35','Комедия'],['18','Драма'],['27','Ужасы'],['10749','Мелодрама'],['16','Мультфильмы']],tv:[['','Все жанры'],['10759','Боевик и приключения'],['35','Комедия'],['18','Драма'],['10765','Фантастика и фэнтези'],['9648','Детектив'],['16','Мультсериалы']]};
-  view.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{kind=b.dataset.kind;view.querySelectorAll('[data-kind]').forEach(x=>x.classList.toggle('on',x===b));view.querySelector('#platformGenre').innerHTML=genreOptions[kind].map(([id,label])=>`<option value="${id}">${label}</option>`).join('');load(true)});
-  view.querySelectorAll('select').forEach(x=>x.onchange=()=>load(true));more.onclick=()=>load();await load(true);
+  const genreOptions={all:[['','Все жанры'],['35','Комедия'],['18','Драма'],['16','Анимация']],movie:[['','Все жанры'],['28','Боевик'],['35','Комедия'],['18','Драма'],['27','Ужасы'],['10749','Мелодрама'],['16','Мультфильмы']],tv:[['','Все жанры'],['10759','Боевик и приключения'],['35','Комедия'],['18','Драма'],['10765','Фантастика и фэнтези'],['9648','Детектив'],['16','Мультсериалы']]};
+  view.querySelectorAll('[data-kind]').forEach(b=>b.onclick=()=>{kind=b.dataset.kind;view.querySelectorAll('[data-kind]').forEach(x=>{x.classList.toggle('on',x===b);x.setAttribute('aria-pressed',String(x===b));});view.querySelector('#platformGenre').innerHTML=genreOptions[kind].map(([id,label])=>`<option value="${id}">${label}</option>`).join('');load(true)});
+  platformObserver=new IntersectionObserver(entries=>{if(!alive()){platformObserver.disconnect();return;}if(entries.some(e=>e.isIntersecting)&&!busy&&!more.hidden&&!more.querySelector('button'))load();},{root:$('#main'),rootMargin:'600px 0px'});
+  view.querySelectorAll('select').forEach(x=>x.onchange=()=>load(true));grid.addEventListener('click',e=>{if(e.target.closest('[data-platform-retry]'))load();});await load(true);
 }
 
 async function renderHome(view, _r, alive) {
@@ -814,7 +875,6 @@ async function renderHome(view, _r, alive) {
     <div id="collectionSuggestionsWrap"></div>
     <div id="filmCollectionSuggestionsWrap"></div>
     <div id="upcomingAnimeWrap"></div>
-    <div id="platformShelfWrap"></div>
     <div id="tmWrap"></div>
     ${section('Свежее в кино', 'rNewFilms', 'films')}
     ${section('Сейчас смотрят сериалы', 'rSeries', 'series')}
@@ -823,23 +883,13 @@ async function renderHome(view, _r, alive) {
     ${section('Аниме', 'rAnime', 'anime')}
     ${section('ТВ-шоу', 'rShows', 'tvshows')}`;
   $('#heroWrap').innerHTML = '<div class="hero"></div>';
-  $('#platformWrap').innerHTML = platformStrip(); wirePlatformStrip($('#platformWrap'));
-  const platformShelf = $('#platformShelfWrap');
-  platformShelf.innerHTML=section('Подборка платформы','platformShelf');
-  const platformSelect=document.createElement('select');platformSelect.className='platform-switch';platformSelect.setAttribute('aria-label','Выбрать платформу');platformSelect.innerHTML=STREAM_PLATFORMS.map(p=>`<option value="${p.id}">${esc(p.name)}</option>`).join('');
-  $('#platformShelf .sec-head').append(platformSelect);
-  const showPlatform=document.createElement('button');showPlatform.className='activity-more';showPlatform.textContent='Все ›';$('#platformShelf .sec-head').append(showPlatform);
-  let platformToken=0, shelfLoaded=false;
-  const loadPlatform=async()=>{const token=++platformToken,p=STREAM_PLATFORMS.find(x=>x.id===Number(platformSelect.value));$('#platformShelf .rail-track').innerHTML=skelCards(9);const res=await platformRequest(p).catch(()=>({error:'NETWORK'}));if(!alive()||token!==platformToken)return;const items=(res.items||[]).map(x=>({...x.item,alt:x.poster}));if(items.length)homeFillRail('platformShelf',items);else $('#platformShelf .rail-track').innerHTML='<p class="hint">Не удалось загрузить подборку платформы.</p>';};
-  platformSelect.onchange=loadPlatform;showPlatform.onclick=()=>go({name:'platform',id:Number(platformSelect.value)});
-  const shelfObserver=new IntersectionObserver(entries=>{if(!entries.some(e=>e.isIntersecting)||shelfLoaded)return;shelfLoaded=true;shelfObserver.disconnect();loadPlatform();},{root:$('#main'),rootMargin:'300px 0px'});shelfObserver.observe(platformShelf);
-  const oldStopHomeRails=stopHomeRails;stopHomeRails=()=>{shelfObserver.disconnect();oldStopHomeRails();};
+  $('#platformWrap').innerHTML=platformStrip();wirePlatformStrip($('#platformWrap'));
 
   if (state.history.length) {
     $('#histWrap').innerHTML = section('Остановились на самом интересном', 'rHist');
     const historyLink = document.createElement('button'); historyLink.className = 'activity-more'; historyLink.textContent = 'Вся активность ›'; historyLink.onclick = () => go({name:'activity'}); $('#rHist .sec-head').append(historyLink);
-    homeFillRail('rHist', state.history.slice(0, 14), (h) => ({ del: true, progress: progressPct(h.id, h.season, h.episode), sub: h.season ? (h.aoSlug || String(h.id).startsWith('ao:') ? `${h.episode} серия` : `${h.season} сезон · ${h.episode} серия`) : 'Продолжить' }));
-    animeHistoryCards(state.history.slice(0, 14), homeAnimeInfo).then(items => { if (alive() && $('#rHist')) homeFillRail('rHist', items, h => ({ del:true, progress:progressPct(h.id,h.season,h.episode), sub:h.season ? (h.aoSlug ? `${h.episode} серия` : `${h.season} сезон · ${h.episode} серия`) : 'Продолжить' })); });
+    homeFillRail('rHist', state.history.slice(0, 14), (h) => ({ del: true, progress: historyProgressPct(h), sub: h.season ? (h.aoSlug || String(h.id).startsWith('ao:') ? `${h.episode} серия` : `${h.season} сезон · ${h.episode} серия`) : 'Продолжить' }));
+    animeHistoryCards(state.history.slice(0, 14), homeAnimeInfo).then(items => { if (alive() && $('#rHist')) homeFillRail('rHist', items, h => ({ del:true, progress:historyProgressPct(h), sub:h.season ? (h.aoSlug ? `${h.episode} серия` : `${h.season} сезон · ${h.episode} серия`) : 'Продолжить' })); });
   }
   const notStarted = state.favs.filter((it) => !wasOpened(it)).slice(0, 20);
   if (optGet('luma.personalHome','0') === '1' && notStarted.length) {
@@ -1027,7 +1077,7 @@ async function buildHero(items, alive, opts = {}) {
         <div class="hero-tag" style="--i:0">${ico('anime').replace('<svg', '<svg width="14" height="14"')} ${esc(opts.tag || (it.backdrop ? 'В тренде' : 'Новинка'))}</div>
         <h1 style="--i:1">${esc(it.name)}</h1>
         <div class="meta" style="--i:2">
-          ${r ? `<span class="rate ${rateClass(r)}" title="${Number(it.kp_rating || it.kp) > 0 ? 'Кинопоиск' : Number(it.imdb_rating || it.imdb) > 0 ? 'IMDb' : 'Shikimori'}">${Number(it.kp_rating || it.kp) > 0 ? brandIcon('kp') : Number(it.imdb_rating || it.imdb) > 0 ? brandIcon('imdb') : 'Shikimori'}<b>${r.toFixed(1)}</b></span>` : ''}
+          ${r ? `<span class="rate ${rateClass(r)}" title="${Number(it.kp_rating || it.kp) > 0 ? 'Кинопоиск' : Number(it.imdb_rating || it.imdb) > 0 ? 'IMDb' : 'Shikimori'}">${Number(it.kp_rating || it.kp) > 0 ? brandIcon('kp') : Number(it.imdb_rating || it.imdb) > 0 ? brandIcon('imdb') : brandIcon('shikimori')}<b>${r.toFixed(1)}</b></span>` : ''}
           <span>${it.year || ''}</span>${inf.time ? `<span>${esc(inf.time)}</span>` : ''}
           ${inf.age ? `<span class="chip">${inf.age}+</span>` : ''}
           ${(inf.genre || []).slice(0, 3).map((g) => `<span class="chip">${esc(g)}</span>`).join('')}
@@ -1104,12 +1154,20 @@ async function buildHero(items, alive, opts = {}) {
 }
 
 /* ================= каталог ================= */
+const LUMA_GENRES=['Боевик','Комедия','Драма','Триллер','Фантастика','Ужасы','Детектив','Фэнтези','Мелодрама','Приключения','Криминал','Семейный','Биография','Военный','История','Документальный','Музыка','Мюзикл','Спорт','Вестерн','Детский','Мультфильм'];
+const genreSummary=s=>{const parts=String(s||'').split(',').filter(Boolean);return parts.slice(0,2).join(' + ')+(parts.length>2?' +'+(parts.length-2):'');};
+async function openAnimeGenres(selected,onApply,kind='anime'){
+ const previous=document.activeElement,overlay=document.createElement('div');overlay.className='genre-dialog-overlay';overlay.innerHTML='<div class="genre-dialog" role="dialog" aria-modal="true" aria-labelledby="genreTitle"><h2 id="genreTitle">Жанры аниме</h2><p class="hint">Можно выбрать несколько жанров одновременно.</p><input aria-label="Найти жанр" placeholder="Найти жанр"><div class="genre-options"><p class="hint">Загружаем жанры…</p></div><div class="genre-actions"><button class="btn ghost" data-reset>Сбросить</button><button class="btn ghost" data-cancel>Отмена</button><button class="btn primary" data-apply>Показать</button></div></div>';document.body.append(overlay);const chosen=new Set(selected),list=overlay.querySelector('.genre-options'),input=overlay.querySelector('input');let genres=[];
+ overlay.querySelector('#genreTitle').textContent=kind==='anime'?'Жанры аниме':'Жанры';
+ const close=()=>{document.removeEventListener('keydown',key,true);overlay.remove();previous?.focus({preventScroll:true});},key=e=>{if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();close();return;}if(e.key==='Tab'){const controls=[...overlay.querySelectorAll('input,button')].filter(x=>!x.disabled&&x.getClientRects().length),i=controls.indexOf(document.activeElement);if(controls.length&&((e.shiftKey&&i<=0)||(!e.shiftKey&&(i<0||i===controls.length-1)))){e.preventDefault();controls[e.shiftKey?controls.length-1:0].focus();}}};document.addEventListener('keydown',key,true);overlay.querySelector('[data-cancel]').onclick=close;overlay.onclick=e=>{if(e.target===overlay)close();};
+ const paint=()=>{const q=input.value.trim().toLocaleLowerCase('ru-RU');list.innerHTML=genres.filter(g=>g.toLocaleLowerCase('ru-RU').includes(q)).map(g=>`<button type="button" class="genre-option ${chosen.has(g)?'on':''}" data-genre="${esc(g)}" aria-pressed="${chosen.has(g)}">${esc(g)}</button>`).join('')||'<p class="hint">Жанры не найдены.</p>';};
+ list.onclick=e=>{const b=e.target.closest('[data-genre]');if(!b)return;const g=b.dataset.genre;chosen.has(g)?chosen.delete(g):chosen.add(g);b.classList.toggle('on',chosen.has(g));b.setAttribute('aria-pressed',String(chosen.has(g)));};input.oninput=paint;overlay.querySelector('[data-reset]').onclick=()=>{chosen.clear();paint();};overlay.querySelector('[data-apply]').onclick=()=>{const result=[...chosen];close();onApply(result);};input.focus();const r=kind==='anime'?await window.lift.aoGenres().catch(()=>({error:'NETWORK'})):{items:LUMA_GENRES};if(!overlay.isConnected)return;if(r.error||!r.items?.length){list.innerHTML='<p class="hint">Не удалось загрузить жанры. Закройте окно и попробуйте ещё раз.</p>';return;}genres=[...new Set([...selected,...r.items])];paint();
+}
 async function renderAnimeHome(view, alive) {
-  const genres=['Экшен','Комедия','Драма','Приключения','Фэнтези','Романтика','Фантастика','Детектив'];
-  view.innerHTML=`<div class="page-head"><h1>Аниме</h1><p class="sub">Подборки и новинки AnimeOn</p></div><div id="animeSpotlight"></div><div class="filters anime-home-genres"><button class="pill on" data-anime-all>Весь каталог</button>${genres.map(g=>`<button class="pill" data-anime-genre="${esc(g)}">${esc(g)}</button>`).join('')}</div>${section('Онгоинги','aoOngoing')}${section('Популярные новинки','aoNew')}${section('Новые серии','aoRecent')}${section('Популярное на AnimeOn','aoPopular')}${section('Лучшее по рейтингу Кинопоиска','aoKp')}${section('Лучшее по рейтингу IMDb','aoImdb')}`;
+  view.innerHTML=`<header class="catalog-intro catalog-intro-library"><div class="catalog-intro-copy"><span class="catalog-eyebrow">КАТАЛОГ LUMA <i></i> ANIMEON</span><h1>Аниме</h1><p>Новые серии, популярные истории и подборки AnimeOn.</p></div></header><div id="animeSpotlight"></div><div class="filters catalog-toolbar anime-home-genres"><span class="catalog-filter-label">Аниме</span><button class="anime-catalog-button" data-anime-all>Весь каталог <span aria-hidden="true">→</span></button><button class="pill catalog-genre-trigger" data-anime-genres aria-label="Выбрать жанры"><span class="catalog-genre-label">Жанры</span><span class="catalog-genre-value">Все жанры</span><span class="catalog-genre-arrow" aria-hidden="true">⌄</span></button></div>${section('Онгоинги','aoOngoing')}${section('Недавние завершённые релизы','aoNew')}${section('Новые серии','aoRecent')}${section('Популярное на AnimeOn','aoPopular')}${section('Лучшее по рейтингу Кинопоиска','aoKp')}${section('Лучшее по рейтингу IMDb','aoImdb')}`;
   window.lift.aoSlider().then(slides=>{const slide=slides?.find(x=>x.slug && x.background);if(!alive()||!slide)return;const el=view.querySelector('#animeSpotlight');if(!el)return;el.innerHTML=`<button class="anime-spotlight" data-slide><img src="${esc(slide.background)}" alt=""><span><small>ВЫБОР ANIMEON</small><b>${esc(slide.title)}</b><i>Открыть аниме →</i></span></button>`;el.querySelector('button').onclick=()=>go({name:'details',id:'ao:'+slide.slug,from:'anime'});}).catch(()=>{});
   view.querySelector('[data-anime-all]').onclick=()=>go({name:'section',key:'anime',browse:true});
-  view.querySelectorAll('[data-anime-genre]').forEach(b=>b.onclick=()=>go({name:'section',key:'anime',browse:true,genre:b.dataset.animeGenre}));
+  view.querySelector('[data-anime-genres]').onclick=()=>openAnimeGenres([],genres=>go({name:'section',key:'anime',browse:true,genre:genres.join(',')}));
   const rows=[
     ['aoOngoing',{status:'ongoing',sort:'popular'}], ['aoNew',{feed:'new'}], ['aoRecent',{feed:'recent'}],
     ['aoPopular',{sort:'popular'}], ['aoKp',{source:'luma',sort:'kp'}], ['aoImdb',{source:'luma',sort:'imdb'}]
@@ -1124,23 +1182,53 @@ async function renderAnimeHome(view, alive) {
   }));
 }
 
+function mountShowSearch(view,provider,alive){
+ const host=document.createElement('section');host.className='show-search';host.innerHTML='<form><label>Поиск выпусков <input aria-label="Поиск шоу" placeholder="Название шоу или выпуска" maxlength="160"></label><button class="btn ghost" type="submit">Найти</button><button class="btn ghost" type="button" data-clear>Очистить</button></form><div data-results></div>';view.querySelector(provider==='vk'?'#vkShowsContent':'#showsContent').before(host);
+ const form=host.querySelector('form'),input=host.querySelector('input'),out=host.querySelector('[data-results]');let seq=0,items=[];
+ form.onsubmit=async e=>{e.preventDefault();const q=input.value.trim(),n=++seq;if(!q){out.innerHTML='';return;}out.innerHTML='<p class="hint">Ищем выпуски…</p>';const result=await (provider==='vk'?window.lift.vkShowsSearch(q):window.lift.rutubeShowsSearch(q)).catch(()=>({error:'NETWORK'}));if(!alive()||!host.isConnected||n!==seq)return;items=result.items||[];out.innerHTML=result.error?'<p class="hint">Поиск временно недоступен. Попробуйте ещё раз.</p>':items.length?'<p class="hint">Результаты поиска видео — проверьте название выпуска.</p><div class="show-video-grid">'+items.map((x,i)=>`<button class="show-video" data-found="${i}"><span>${x.image?`<img loading="lazy" src="${esc(x.image)}" alt="">`:''}</span><b>${esc(x.title)}</b><small>${esc([x.channel,x.duration?fmtTime(x.duration):''].filter(Boolean).join(' · '))}</small></button>`).join('')+'</div>':'<p class="hint">Ничего не найдено. Попробуйте другой запрос.</p>';};
+ host.querySelector('[data-clear]').onclick=()=>{seq++;input.value='';out.innerHTML='';input.focus();};out.onclick=e=>{const b=e.target.closest('[data-found]'),x=b&&items[Number(b.dataset.found)];if(x)playItem({id:provider+':'+x.id,name:x.title,type:4,poster:x.image,info:{}},[],null,null,provider==='vk'?{vkVideo:x}:{rutubeVideo:x});};
+}
+async function renderRutubeShows(view,route,alive){
+  const show=route.show;
+  view.innerHTML=`<div class="rutube-shows-page"><header class="catalog-intro catalog-source-intro"><div class="catalog-intro-copy"><span class="catalog-eyebrow">КАТАЛОГ LUMA <i></i> ТВ-ШОУ</span><h1>${esc(show?.name||'Шоу Rutube')}</h1><p>${show?'Выпуски шоу на Rutube.':'Передачи и выпуски из коллекций Rutube.'}</p></div><button class="catalog-back" id="showsBack"><span>←</span> ${show?'Все подборки':'Все ТВ-шоу'}</button></header><div id="showsContent"><div class="spin"></div></div></div>`;
+  $('#showsBack').onclick=()=>go(show?{name:'section',key:'tvshows',source:'rutube'}:{name:'section',key:'tvshows'});
+  if(!show)mountShowSearch(view,'rutube',alive);
+  const target=$('#showsContent');
+  if(!show){const data=await window.lift.rutubeShowGroups();if(!alive())return;if(data.error){target.innerHTML='<div class="empty"><h3>Подборки Rutube временно недоступны</h3><p>Попробуйте ещё раз.</p><button class="btn ghost" data-shows-retry>Повторить</button></div>';target.querySelector('[data-shows-retry]').onclick=()=>renderRutubeShows(view,route,alive);return;}target.innerHTML=data.groups.map((g,k)=>`<section class="show-collection"><h2>${esc(g.title)}</h2><div class="show-track">${g.items.map((x,i)=>`<button class="show-tile" data-group="${k}" data-item="${i}">${x.poster?`<img loading="lazy" src="${esc(x.poster)}" alt="">`:''}<b>${esc(x.name)}</b></button>`).join('')}</div></section>`).join('');target.onclick=e=>{const b=e.target.closest('[data-group]');if(!b)return;const x=data.groups[+b.dataset.group]?.items[+b.dataset.item];if(x)go({name:'section',key:'tvshows',source:'rutube',show:x});};return;}
+  const page=Math.max(1,Number(route.page)||1),result=await window.lift.rutubeShowVideos(show.id,page);if(!alive())return;if(result.error){target.innerHTML='<div class="empty"><h3>Не удалось загрузить выпуски</h3><button class="btn ghost" data-shows-retry>Повторить</button></div>';target.querySelector('[data-shows-retry]').onclick=()=>renderRutubeShows(view,route,alive);return;}let items=result.items;target.innerHTML=items.length?`<div class="show-video-grid">${items.map((x,i)=>`<button class="show-video" data-video="${i}"><span>${x.image?`<img loading="lazy" src="${esc(x.image)}" alt="">`:''}</span><b>${esc(x.title)}</b><small>${x.duration?esc(fmtTime(x.duration)):''}</small></button>`).join('')}</div><div class="show-pagination">${page>1?'<button class="btn ghost" data-show-page="'+(page-1)+'">← Предыдущие</button>':''}${result.hasMore?'<button class="btn ghost" data-show-page="'+(page+1)+'">Следующие выпуски →</button>':''}</div>`:'<div class="empty"><h3>Бесплатных выпусков пока нет</h3></div>';target.onclick=e=>{const next=e.target.closest('[data-show-page]');if(next){go({name:'section',key:'tvshows',source:'rutube',show,page:Number(next.dataset.showPage)});return;}const b=e.target.closest('[data-video]');if(!b)return;const x=items[+b.dataset.video];if(x)playItem({id:'rutube:'+x.id,name:x.title,type:4,poster:x.image,info:{}},[],null,null,{rutubeVideo:x});};
+}
+async function renderVkShows(view,alive){
+ view.innerHTML='<div class="vk-shows-page"><header class="catalog-intro catalog-source-intro"><div class="catalog-intro-copy"><span class="catalog-eyebrow">КАТАЛОГ LUMA <i></i> ТВ-ШОУ</span><h1>Шоу VK Видео</h1><p>Выпуски, передачи и развлечения из VK Видео.</p></div><button class="catalog-back" id="vkShowsBack"><span>←</span> Все ТВ-шоу</button></header><div class="vk-shows-note">Поиск и подборки VK Видео</div><div id="vkShowsContent"><div class="spin"></div></div></div>';$('#vkShowsBack').onclick=()=>go({name:'section',key:'tvshows'});mountShowSearch(view,'vk',alive);const target=$('#vkShowsContent');const data=await window.lift.vkShows().catch(()=>({groups:[]}));if(!alive())return;target.innerHTML=data.groups.length?data.groups.map((g,k)=>`<section class="show-collection"><h2>${esc(g.title)}</h2><div class="show-track">${g.items.map((x,i)=>`<button class="show-video" data-vkg="${k}" data-vki="${i}"><span>${x.image?`<img loading="lazy" src="${esc(x.image)}" alt="">`:''}</span><b>${esc(x.title)}</b><small>${esc([x.channel,x.duration?fmtTime(x.duration):''].filter(Boolean).join(' · '))}</small></button>`).join('')}</div></section>`).join(''):'<div class="empty"><h3>Шоу VK Видео временно недоступны</h3><button class="btn ghost" data-vkshows-retry>Повторить</button></div>';target.onclick=e=>{if(e.target.closest('[data-vkshows-retry]')){renderVkShows(view,alive);return;}const b=e.target.closest('[data-vkg]');if(!b)return;const x=data.groups[+b.dataset.vkg]?.items[+b.dataset.vki];if(x)playItem({id:'vk:'+x.id,name:x.title,type:4,poster:x.image,info:{}},[],null,null,{vkVideo:x});};
+}
+function mountSectionHighlights(view,key,alive){
+ const host=view.querySelector('#sectionHighlights');if(!host)return;const kind=key==='films'?'movie':'tv';host.innerHTML='<p class="hint section-highlight-source">Подборки TMDB · оценки на карточках из Luma</p>'+section('На этой неделе · TMDB','sectionWeek')+section('Высокий рейтинг · TMDB','sectionTop');
+ for(const [id,feed] of [['sectionWeek','week'],['sectionTop','top']]){const node=host.querySelector('#'+id),track=node.querySelector('.rail-track');const load=async()=>{const retry=track.querySelector('[data-retry]');if(retry?.getAttribute('aria-disabled')==='true')return;if(retry){retry.textContent='Загружаем…';retry.setAttribute('aria-disabled','true');}else track.innerHTML='<div class="spin"></div>';const result=await window.lift.tmdbCurated(kind,feed).catch(()=>({error:'NETWORK',items:[]}));if(!alive()||!node.isConnected)return;const restore=retry&&document.activeElement===retry;if(result.items?.length){track.innerHTML=result.items.map((x,i)=>cardHTML(x,i)).join('');wireCards(track);wireRail(node.querySelector('.rail'));node.querySelector('.highlight-note')?.remove();if(result.partial){const note=document.createElement('p');note.className='hint highlight-note';note.textContent='Некоторые совпадения не удалось проверить.';node.append(note);}}else{track.innerHTML=result.error||result.partial?'<div class="empty"><p>Подборка временно недоступна.</p><button class="btn ghost" data-retry>Повторить</button></div>':'<p class="hint">Совпадений в каталоге Luma пока нет.</p>';track.querySelector('[data-retry]')?.addEventListener('click',load);}if(restore)(track.querySelector('button')||view.querySelector('#sortSeg button'))?.focus({preventScroll:true});};load();}
+}
 async function renderSection(view, route, alive) {
+  if(route.key==='tvshows' && route.source==='rutube')return renderRutubeShows(view,route,alive);
+  if(route.key==='tvshows' && route.source==='vk')return renderVkShows(view,alive);
   if (route.key === 'anime' && !route.browse && !route.genre && !route.sort && !route.feed && !route.status) return renderAnimeHome(view, alive);
   const s = SECTIONS[route.key];
   const g0 = route.genre ? cap(route.genre) : '';
   const st = { sort: route.key === 'anime' && route.source !== 'luma' && !['popular', 'rating', 'year'].includes(route.sort) ? 'popular' : (route.sort || 'popular'), genre: g0, page: 1, busy: false, done: false, source: route.key === 'anime' && route.source !== 'luma' ? 'animeon' : 'luma', error: false };
-  view.innerHTML = `<div class="page-head"><h1>${esc(g0 || (route.feed === 'recent' ? 'Новые серии' : route.status === 'ongoing' ? 'Онгоинги' : s.title))}</h1>${g0 ? `<p class="sub">Популярное в жанре · ${esc(s.title)}</p>` : ''}</div>
-    <div class="filters" id="filters"></div><div class="grid" id="grid"></div><div class="more" id="more"></div>`;
+  const sectionHeading = route.key === 'tvshows' ? `<header class="catalog-intro"><div class="catalog-intro-copy"><span class="catalog-eyebrow">КАТАЛОГ LUMA <i></i> РАЗВЛЕЧЕНИЯ</span><h1>ТВ-шоу</h1><p>Реалити, передачи и новые выпуски — выбирайте, что посмотреть.</p></div><div class="catalog-sources" aria-label="Шоу по источникам"><span>СМОТРЕТЬ ПО ИСТОЧНИКУ</span><div><button class="catalog-source" id="showsRutube"><img src="assets/rutube-icon.svg" alt=""><span><b>Rutube</b><small>Шоу и выпуски</small></span><i>↗</i></button><button class="catalog-source" id="showsVk"><img src="assets/vk-video.svg" alt=""><span><b>VK Видео</b><small>Шоу и выпуски</small></span><i>↗</i></button></div></div></header>` : ['films','series','cartoons','anime'].includes(route.key) ? `<header class="catalog-intro catalog-intro-library"><div class="catalog-intro-copy"><span class="catalog-eyebrow">КАТАЛОГ LUMA <i></i> ${{films:'КИНО',series:'СЕРИАЛЫ',cartoons:'МУЛЬТФИЛЬМЫ',anime:'АНИМЕ'}[route.key]}</span><h1>${esc(route.feed==='recent'?'Новые серии':route.feed==='new'?'Недавние завершённые релизы':route.status==='ongoing'?'Онгоинги':s.title)}</h1><p>${{films:'Новинки, любимая классика и фильмы на любой вечер.',series:'Новые истории, популярные сериалы и то, что стоит посмотреть.',cartoons:'Любимые мультфильмы, новые истории и приключения.',anime:'Каталог аниме, жанры и новые открытия.'}[route.key]}</p></div></header>` : `<div class="page-head"><h1>${esc(g0 ? genreSummary(g0) : (route.feed === 'recent' ? 'Новые серии' : route.status === 'ongoing' ? 'Онгоинги' : s.title))}</h1>${g0 ? `<p class="sub">Популярное по жанрам · ${esc(s.title)}</p>` : ''}</div>`;
+  view.innerHTML = `${sectionHeading}
+    <div class="filters" id="filters"></div>${['films','series'].includes(route.key)?`<div id="sectionHighlights" ${g0?'hidden':''}></div><div class="sec-head"><h2>Каталог</h2></div>`:''}<div class="grid" id="grid"></div><div class="more" id="more"></div>`;
+  if(['films','series'].includes(route.key)&&!g0)mountSectionHighlights(view,route.key,alive);
   const genres = route.key === 'anime' ? ['Экшен','Комедия','Драма','Фантастика','Ужасы','Детектив','Фэнтези','Романтика','Приключения','Сёнен','Повседневность'] : ['Боевик', 'Комедия', 'Драма', 'Триллер', 'Фантастика', 'Ужасы', 'Детектив', 'Фэнтези', 'Мелодрама', 'Приключения', 'Криминал', 'Семейный'];
+  $('#showsRutube')?.addEventListener('click',()=>go({name:'section',key:'tvshows',source:'rutube'}));
+  $('#showsVk')?.addEventListener('click',()=>go({name:'section',key:'tvshows',source:'vk'}));
   const f = $('#filters');
-  f.innerHTML = `<div class="seg" id="sortSeg"><span class="ind"></span>
+  const compactCatalog=['tvshows','films','series','cartoons','anime'].includes(route.key);
+  f.classList.toggle('catalog-toolbar',compactCatalog);
+  f.innerHTML = `${compactCatalog?'<span class="catalog-filter-label">Сортировка каталога</span>':''}<div class="seg" id="sortSeg"><span class="ind"></span>
       <button data-s="popular">Популярные</button><button data-s="${route.key === 'anime' && st.source === 'animeon' ? 'rating' : 'kp'}">${route.key === 'anime' && st.source === 'animeon' ? 'Рейтинг' : 'Кинопоиск'}</button><button data-s="${route.key === 'anime' && st.source === 'animeon' ? 'year' : 'imdb'}">${route.key === 'anime' && st.source === 'animeon' ? 'Новинки' : 'IMDb'}</button></div>
-    <span class="sp"></span>
-    ${g0 ? `<div class="seg" id="typeSeg"><span class="ind"></span>${['films', 'series', 'cartoons', 'anime', 'tvshows'].map((k) => `<button data-k="${k}" class="${k === route.key ? 'on' : ''}">${SECTIONS[k].title}</button>`).join('')}</div><span class="sp"></span>` : ''}
-    <button class="pill ${g0 ? '' : 'on'}" data-g="">Все жанры</button>${[...(g0 && !genres.includes(g0) ? [g0] : []), ...genres].map((g) => `<button class="pill ${g === g0 ? 'on' : ''}" data-g="${g}">${g}</button>`).join('')}`;
+    ${compactCatalog?'':'<span class="sp"></span>'}
+    ${g0 && !g0.includes(',') ? `<div class="seg" id="typeSeg"><span class="ind"></span>${['films', 'series', 'cartoons', 'anime', 'tvshows'].map((k) => `<button data-k="${k}" class="${k === route.key ? 'on' : ''}">${SECTIONS[k].title}</button>`).join('')}</div><span class="sp"></span>` : ''}
+    ${(['tvshows','cartoons'].includes(route.key)||(route.key==='anime'&&st.source==='luma'))?`<label class="catalog-genre"><span>Жанр</span><select id="showGenre" aria-label="Жанр"><option value="">Все жанры</option>${[...(g0 && !genres.includes(g0)?[g0]:[]),...genres].map(g=>`<option value="${esc(g)}" ${g===g0?'selected':''}>${esc(g)}</option>`).join('')}</select></label>`:(route.key==='anime'&&st.source==='animeon')||['films','series'].includes(route.key)?(['films','series','anime'].includes(route.key)?`<button class="pill catalog-genre-trigger ${g0?'on':''}" data-anime-genres aria-label="Выбрать жанры"><span class="catalog-genre-label">Жанры</span><span class="catalog-genre-value">${g0?esc(genreSummary(g0)):'Все жанры'}</span><span class="catalog-genre-arrow" aria-hidden="true">⌄</span></button>`:`<button class="pill ${g0?'on':''}" data-anime-genres>Жанры${g0?' · '+esc(genreSummary(g0)):' · все'}</button>`):`<button class="pill ${g0 ? '' : 'on'}" data-g="">Все жанры</button>${[...(g0 && !genres.includes(g0) ? [g0] : []), ...genres].map((g) => `<button class="pill ${g === g0 ? 'on' : ''}" data-g="${g}">${g}</button>`).join('')}`}`;
   if (route.feed === 'recent' || route.feed === 'new') f.hidden = true;
   const typeSeg = $('#typeSeg');
-  if (typeSeg) { requestAnimationFrame(() => segIndicator(typeSeg)); typeSeg.onclick = (e) => { const b = e.target.closest('button'); if (b && b.dataset.k !== route.key) go({ name: 'section', key: b.dataset.k, genre: st.genre || g0 }, { replace: true }); }; }
+  if (typeSeg) { requestAnimationFrame(() => segIndicator(typeSeg)); typeSeg.onclick = (e) => { const b = e.target.closest('button'); if (b && b.dataset.k !== route.key) go({ name: 'section', key: b.dataset.k, genre: (st.genre||g0).includes(',')?'':(st.genre||g0) }, { replace: true }); }; }
   const seg = $('#sortSeg');
   const moveInd = () => {
     const b = $('button.on', seg); const ind = $('.ind', seg);
@@ -1174,8 +1262,11 @@ async function renderSection(view, route, alive) {
           items = (r.items || []).map(aoListToLuma);
           if (r.error) st.error = true;
           if (r.error || items.length < 30 || (r.total && st.page * 30 >= r.total)) st.done = true;
-        } else items = await catalog({ cat: s.cat, page: st.page, limit: 30, sort: st.sort, genre: st.genre, extra: st.sort === 'imdb' ? { kpMin: 6 } : {} });
-      } catch { st.done = true; st.error = true; break; }
+        } else {
+          const wanted=st.genre.split(',').filter(Boolean),localOnly=['биография','история','спорт'].includes(String(wanted[0]||'').toLocaleLowerCase('ru-RU'));items = await catalog({ cat: s.cat, page: st.page, limit: 30, sort: st.sort, genre: localOnly?'':wanted[0]||'', extra: st.sort === 'imdb' ? { kpMin: 6 } : {} });
+          if((wanted.length>1||localOnly)&&items.length){const batch=await window.lift.apiPost('/info/batch',{ids:items.map(x=>String(x.id))});if(!alive()||gen!==st.gen)return;const byId=new Map((batch.items||[]).map(x=>[String(x.id),x]));if(items.some(x=>!Array.isArray(byId.get(String(x.id))?.info?.genre)))throw Error('genres unavailable');const norm=x=>String(x).trim().toLocaleLowerCase('ru-RU');const required=wanted.map(norm);items=items.filter(x=>{const genres=byId.get(String(x.id)).info.genre.map(norm);return required.every(g=>genres.includes(g));});if(!items.length){st.page++;continue;}}
+        }
+      } catch { if(!alive()||gen!==st.gen)return;st.done = true; st.error = true; break; }
       if (!alive() || gen !== st.gen) return;
       st.page++;
       if (!items.length) { st.done = true; break; }
@@ -1187,27 +1278,31 @@ async function renderSection(view, route, alive) {
       [...tmp.children].forEach((c) => { c.style.animation = 'viewIn .55s var(--ease) both'; grid.append(c); });
       wireCards(grid); added += items.length;
     }
-    if (gen !== st.gen) return;
-    if (st.fresh) { grid.innerHTML = st.error ? '<div class="empty" style="grid-column:1/-1"><h3>Каталог временно недоступен</h3>Проверьте соединение и попробуйте ещё раз.</div>' : '<div class="empty" style="grid-column:1/-1"><h3>Тут пусто</h3>Попробуйте другой жанр</div>'; st.fresh = false; }
-    more.innerHTML = ''; st.busy = false;
-    if (alive() && !st.done) { io.unobserve(more); io.observe(more); }
+    if (!alive() || gen !== st.gen) return;
+    if (st.fresh) { grid.innerHTML = st.error ? '<div class="empty" style="grid-column:1/-1"><h3>Каталог временно недоступен</h3>Проверьте соединение и попробуйте ещё раз.</div>' : st.done?'<div class="empty" style="grid-column:1/-1"><h3>Тут пусто</h3>Попробуйте другой жанр</div>':'<div class="empty" style="grid-column:1/-1"><h3>На проверенных страницах совпадений нет</h3>Можно продолжить поиск.</div>'; }
+    more.innerHTML = st.error ? '<button class="btn ghost" data-catalog-retry>Повторить загрузку</button>' : st.fresh&&!st.done?'<button class="btn ghost" data-catalog-continue>Искать дальше</button>':''; st.busy = false;
+    if (st.error) more.querySelector('[data-catalog-retry]').onclick = () => { const empty = !grid.querySelector('.card:not(.skel)'); st.done = false; st.error = false; load(empty); };
+    if(more.querySelector('[data-catalog-continue]'))more.querySelector('[data-catalog-continue]').onclick=()=>load(false);
+    if (alive() && !st.done && !st.fresh) { io.unobserve(more); io.observe(more); }
   }
   seg.onclick = (e) => { const b = e.target.closest('button'); if (!b) return; st.sort = b.dataset.s; setSort(st.sort); load(true); };
-  f.onclick = (e) => { const b = e.target.closest('.pill'); if (!b) return; $$('.pill', f).forEach((x) => x.classList.toggle('on', x === b)); st.genre = b.dataset.g; load(true); };
+  view.querySelector('#showGenre')?.addEventListener('change',e=>{st.genre=e.target.value;route.genre=st.genre;load(true);});
+  f.onclick = (e) => { const b = e.target.closest('.pill'); if (!b) return;if(b.hasAttribute('data-anime-genres')){openAnimeGenres(st.genre?st.genre.split(','):[],selected=>{st.genre=selected.join(',');route.genre=st.genre;const heading=view.querySelector('.page-head h1');if(heading)heading.textContent=selected.length?genreSummary(st.genre):s.title;if(b.classList.contains('catalog-genre-trigger'))b.querySelector('.catalog-genre-value').textContent=selected.length?genreSummary(st.genre):'Все жанры';else b.textContent=selected.length?'Жанры · '+genreSummary(st.genre):'Жанры · все';b.classList.toggle('on',!!selected.length);const highlights=view.querySelector('#sectionHighlights');if(highlights){highlights.hidden=!!selected.length;if(!selected.length&&!highlights.childElementCount)mountSectionHighlights(view,route.key,alive);}load(true);},route.key==='anime'?'anime':'luma');return;} $$('.pill', f).forEach((x) => x.classList.toggle('on', x === b)); st.genre = b.dataset.g; load(true); };
   // бесконечная прокрутка: подгружаем, пока «хвост» списка виден (в том числе когда экран ещё не заполнен)
   const io = new IntersectionObserver((en) => {
     if (!alive()) { io.disconnect(); return; }
     if (en[0].isIntersecting) load(false);
   }, { root: $('#main'), rootMargin: '900px' });
   await load(true);
-  io.observe(more);
+  if(!st.fresh&&!st.done)io.observe(more);
 }
 
 /* ================= избранное / история ================= */
 async function renderFavs(view) {
-  view.innerHTML = `<div class="page-head"><h1>Избранное</h1></div>`;
-  view.innerHTML += `<div class="filters"><select id="randomScope" aria-label="Источник случайного выбора"><option value="favorites">Из избранного</option><option value="catalog">Из каталога</option></select><select id="randomKind" aria-label="Категория случайного выбора"><option value="all">Все категории</option><option value="films">Фильмы</option><option value="series">Сериалы</option><option value="cartoons">Мультфильмы</option><option value="anime">Аниме</option></select><label><input type="checkbox" id="randomUnseen"> Только не открывавшиеся</label><button class="btn ghost" id="randomFavorite">${ico('dice')} Случайный выбор</button></div>`;
-  view.innerHTML += state.favs.length ? `<div class="grid">${state.favs.map((it, i) => cardHTML(it, Math.min(i, 14), { del: true })).join('')}</div>` : '<div class="empty"><h3>Пока пусто</h3>Добавьте тайтл в избранное или выберите случайный из каталога.</div>';
+  view.innerHTML = libraryHeader('Избранное','Фильмы, сериалы и другие истории, которые вы сохранили.',state.favs.length,'в избранном');
+  view.innerHTML += `<div class="filters catalog-toolbar library-toolbar"><span class="catalog-filter-label">Случайный выбор</span><select id="randomScope" aria-label="Источник случайного выбора"><option value="favorites">Из избранного</option><option value="catalog">Из каталога</option></select><select id="randomKind" aria-label="Категория случайного выбора"><option value="all">Все категории</option><option value="films">Фильмы</option><option value="series">Сериалы</option><option value="cartoons">Мультфильмы</option><option value="anime">Аниме</option></select><label class="library-check"><input type="checkbox" id="randomUnseen"> Только не открывавшиеся</label><button class="btn ghost" id="randomFavorite">${ico('dice')} Случайный выбор</button></div>`;
+  view.innerHTML += state.favs.length ? `<div class="library-section-head"><h2>Сохранённые тайтлы</h2></div><div class="grid">${state.favs.map((it, i) => cardHTML(it, Math.min(i, 14), { del: true })).join('')}</div>` : libraryEmpty('Пока пусто','Добавьте тайтл в избранное или выберите случайный из каталога.');
+  wireLibraryCatalog(view);
   $('#randomFavorite').onclick = async (e) => {
     const button = e.currentTarget, kind = $('#randomKind').value, unseen = $('#randomUnseen').checked, scope = $('#randomScope').value;
     const requestToken = navToken;
@@ -1253,7 +1348,7 @@ async function renderFavs(view) {
   wireCards(view);
   view.onclick = (e) => {
     const d = e.target.closest('[data-del]');
-    if (d) { e.stopPropagation(); const id = idOf(d.dataset.del); state.favs = state.favs.filter((f) => f.id !== id); goneMark('f', id); persist('favs'); updateBadges(); render(currentRoute); }
+    if (d) { e.stopPropagation(); const id = idOf(d.dataset.del); state.favs = state.favs.filter((f) => String(f.id) !== String(id)); goneMark('f', id); persist('favs'); updateBadges(); render(currentRoute); }
   };
 }
 async function animeHistoryCards(items, getAnimeInfo = slug => window.lift.aoInfo(slug).catch(() => null)) {
@@ -1264,15 +1359,16 @@ async function animeHistoryCards(items, getAnimeInfo = slug => window.lift.aoInf
   }));
 }
 async function renderHistory(view, _route, alive) {
-  view.innerHTML = `<div class="page-head"><h1>История</h1></div>`;
-  if (!state.history.length) { view.innerHTML += `<div class="empty"><h3>Здесь пока тихо</h3>Начните смотреть, и мы запомним, где вы остановились</div>`; return; }
-  view.innerHTML += '<div class="grid" id="historyGrid"></div>';
+  view.innerHTML = libraryHeader('История','Продолжайте просмотр с того места, где остановились.',state.history.length,'в истории');
+  if (!state.history.length) { view.innerHTML += libraryEmpty('Здесь пока тихо','Начните смотреть, и мы запомним, где вы остановились.'); wireLibraryCatalog(view); return; }
+  view.innerHTML += '<div class="library-section-head"><h2>Недавно смотрели</h2><button class="activity-more" id="libraryActivity">Вся активность ›</button></div><div class="grid" id="historyGrid"></div>';
+  view.querySelector('#libraryActivity').onclick=()=>go({name:'activity'});
   const paint = items => { const grid = $('#historyGrid', view); if (!grid) return; grid.innerHTML = items.map((it, i) => cardHTML(it, Math.min(i, 14), { del: true, sub: it.season ? (it.aoSlug || String(it.id).startsWith('ao:') ? `${it.episode} серия` : `${it.season} сезон · ${it.episode} серия`) : '' })).join(''); wireCards(grid); };
   const snapshot = state.history.slice(); paint(snapshot);
   animeHistoryCards(snapshot).then(items => { if (alive() && state.history.length === snapshot.length && state.history.every((h, i) => h === snapshot[i])) paint(items); });
   view.onclick = (e) => {
     const d = e.target.closest('[data-del]');
-    if (d) { e.stopPropagation(); const id = idOf(d.dataset.del); state.history = state.history.filter((f) => f.id !== id); goneMark('h', id); persist('history'); render(currentRoute); }
+    if (d) { e.stopPropagation(); const id = idOf(d.dataset.del); state.history = state.history.filter((f) => String(f.id) !== String(id)); goneMark('h', id); persist('history'); render(currentRoute); }
   };
 }
 
@@ -1475,7 +1571,7 @@ async function renderDetails(view, route, alive) {
   const pre = (src) => new Promise((res) => { if (!src) return res(''); const i = new Image(); i.onload = () => res(src); i.onerror = () => res(''); i.src = src; });
   let T = null, R = null, bdSrc = '', logoSrc = '', tmWhy = '', tmRequest = null;
   if (tm.has) {
-    tmRequest = window.lift.tmdbFind({ name: d.name, origin_name: d.origin_name || inf.name_eng, year: d.year, type: d.type });
+    tmRequest = window.lift.tmdbFind({ name: d.name, origin_name: d.origin_name || inf.name_eng, year: d.year, type: d.type, aliases: [...(d._ao?.aliases||[]),...(d._ao?.franchise?.nodes?.filter(x=>String(x.id)===String(d._ao.franchise.currentId)).map(x=>x.name)||[])] });
     T = await cap(tmRequest, tm.slow ? 15000 : 8000);
     if (!alive()) return;
     if (!T) tmWhy = 'TMDB не ответил вовремя';
@@ -1491,6 +1587,12 @@ async function renderDetails(view, route, alive) {
   ]);
   if (!alive()) return;
   bdSrc = bd0 || ''; logoSrc = logo0 || ''; R = R0 || null;
+  if(T?.imdb && (!logoSrc || !bdSrc)) {
+    const fallback=await cap(window.lift.cinemetaArt({imdb:T.imdb,kind:T.kind}),6000);
+    if(!alive())return;
+    const [logoAlt,backgroundAlt]=await Promise.all([!logoSrc&&fallback?.logo?cap(pre(fallback.logo),5000):'',!bdSrc&&fallback?.background?cap(pre(fallback.background),5000):'']);
+    if(!alive())return;logoSrc=logoSrc||logoAlt||'';bdSrc=bdSrc||backgroundAlt||'';
+  }
   d._pauseLogo = logoSrc;
   if(T?.kind === 'tv' && !isAnime(d)) d._pauseTmdb = T.tmdb;
   if (T && T.backdrop && !bdSrc) tmWhy = 'картинки TMDB не загрузились (см. Настройки → Проверка связи)';
@@ -1506,7 +1608,7 @@ async function renderDetails(view, route, alive) {
     ? state.history.find(h => h.aoSlug === d._ao?.slug || (h.id === seriesId && (!h.aoSlug || h.aoSlug === d._ao?.slug)))
     : state.history.find((h) => h.id === seriesId && (!d._aoCurrentSeason || d._aoCurrentSeason === '1' || String(h.season) === d._aoCurrentSeason));
   const lastH = storedHistory && String(d.id).startsWith('ao:') && seasons.length ? { ...storedHistory, _legacySeason: storedHistory.season, season: seasons[0].season } : storedHistory;
-  const rsm = lastH ? resumeInfo(lastH.id, lastH._legacySeason || lastH.season, lastH.episode) : resumeInfo(seriesId);
+  const rsm = lastH ? historyResume(lastH) : resumeInfo(seriesId);
   const watchLabel = lastH && lastH.season ? `Продолжить · ${String(d.id).startsWith('ao:') ? 'серия ' + lastH.episode : lastH.season + '×' + lastH.episode}${rsm ? ' · ' + fmtTime(rsm.t) : ''}` : (rsm ? 'Продолжить · ' + fmtTime(rsm.t) : 'Смотреть');
   const isSerial = seasons.length > 0;
   const animeAir = Date.parse(d._ao?.nextEpisodeAt || '');
@@ -1518,17 +1620,17 @@ async function renderDetails(view, route, alive) {
   const fact = (k, v) => v ? `<div class="fact"><small>${k}</small><b>${esc(v)}</b></div>` : '';
   // TMDB покрывает фильмы, сериалы и мультфильмы; у нативной карточки Animeon есть
   // собственные кадры серий. Ограничиваем набор, чтобы не раздувать страницу.
-  const cinematicFrames = [T?.backdrops?.[0] ? TMG(T.backdrops[0], 'w1280') : d._ao?.stills?.[0]].filter(Boolean);
+  const cinematicFrames = [bdSrc || d._ao?.stills?.[0]].filter(Boolean);
   if (!cinematicFrames.length && bdSrc) cinematicFrames.push(bdSrc);
 
-  ambient(bdSrc ? TMG(T.backdrop, 'w780') : d.poster);
+  ambient(bdSrc || d.poster);
   view.innerHTML = `<div class="det">
     <div class="det-bg${bdSrc ? ' bd' : ''}">${cinematicFrames.map((src, i) => `<img class="cine-frame${i ? '' : ' on'}" src="${esc(src)}" alt=""${i > 1 ? ' loading="lazy"' : ''}>`).join('') || `<div style="background-image:url('${esc(d.poster)}')"></div>`}</div>
     <div class="det-top">
       <div class="det-poster" id="dPoster"><img src="${esc(posterSrc)}" alt="${esc(d.name)}"></div>
       <div class="det-info">
         <div class="det-type" style="--i:0">${TYPES[d.type] || ''}${inf.age ? ' · ' + inf.age + '+' : ''}</div>
-        <h1 style="--i:1"${logoSrc ? ' class="has-logo"' : ''}>${logoSrc ? `<img class="det-logo" src="${esc(logoSrc)}" alt="${esc(d.name)}">` : esc(d.name)}</h1>
+        <h1 style="--i:1"${logoSrc ? ' class="has-logo"' : ''}>${logoSrc ? `<img class="det-logo" src="${esc(logoSrc)}" alt="${esc(d.name)}">` : esc(d.name)}</h1>${d._ao && /\[(?:ТВ|TV)[^\]]+\]/i.test(d.name||'')?`<div class="anime-edition">${esc(d.name)}</div>`:''}
         <div class="det-orig" style="--i:2">${esc(d.origin_name || inf.name_eng || '')}${d._aoCurrentSeason && seasons.length > 1 ? ` · Сезон ${esc(d._aoCurrentSeason)}` : ''}</div>
         ${d._aoSeasonLoadIncomplete ? '<div class="hint">Не удалось достоверно объединить все сезоны. Другие части доступны в порядке франшизы.</div>' : ''}
         <div id="episodeCountdownSlot" style="--i:2"></div>
@@ -1543,18 +1645,19 @@ async function renderDetails(view, route, alive) {
         <div class="det-rates" style="--i:5">
           ${kp ? `<span class="rate kp ${rateClass(kp)}" title="Кинопоиск">${brandIcon('kp')}<b>${kp.toFixed(1)}</b></span>` : ''}
           ${im ? `<span class="rate imdb ${rateClass(im)}" title="IMDb">${brandIcon('imdb')}<b>${im.toFixed(1)}</b></span>` : ''}
-          ${d._ao?.rating ? `<span class="rate ${rateClass(d._ao.rating)}" title="Shikimori">Shikimori <b>${Number(d._ao.rating).toFixed(1)}</b></span>` : ''}
+          ${d._ao?.rating ? `<span class="rate ${rateClass(d._ao.rating)}" title="Shikimori">${brandIcon('shikimori')}<b>${Number(d._ao.rating).toFixed(1)}</b></span>` : ''}
           ${extraRates}
           ${d.views ? `<span class="views" style="color:var(--muted);font-size:13px">${Number(d.views).toLocaleString('ru')} просмотров</span>` : ''}
         </div>
         ${inf.slogan && inf.slogan !== '—' ? `<div class="det-slogan" style="--i:6">«${esc(inf.slogan)}»</div>` : ''}
         <div class="row-btns det-btns" style="--i:7">
           <button class="btn primary" id="bWatch">${ico('play')}${watchLabel}</button>
-          <button class="btn ghost" id="bRutube">Rutube</button>
-          ${rsm ? '<button class="btn ghost" id="bStart">С начала</button>' : ''}
-          <button class="btn ghost" id="bTrailer">${ico('trailer')}Трейлер</button>
-          <button class="btn ghost" id="bTorr">${ico('magnet')}Торренты</button>
-          <button class="btn ghost icon fav ${isFav(d.id) ? 'on' : ''}" id="bFav" title="В избранное">${ico('heart')}</button>
+          <button class="btn ghost det-mini" id="bRutube" aria-label="Rutube"><img src="assets/rutube-icon.svg" alt=""><span>Rutube</span></button>
+          <button class="btn ghost det-mini" id="bVk" aria-label="VK Видео"><img src="assets/vk-video.svg" alt=""><span>VK Видео</span></button>
+          ${rsm ? '<button class="btn ghost det-mini" id="bStart" aria-label="С начала">'+ico('play')+'<span>С начала</span></button>' : ''}
+          <button class="btn ghost det-mini" id="bTrailer" aria-label="Трейлер">${ico('trailer')}<span>Трейлер</span></button>
+          <button class="btn ghost det-mini" id="bTorr" aria-label="Торренты">${ico('magnet')}<span>Торренты</span></button>
+          <button class="btn ghost det-mini fav ${isFav(d.id) ? 'on' : ''}" id="bFav" aria-label="${isFav(d.id)?'В избранном':'В избранное'}" aria-pressed="${isFav(d.id)}">${ico('heart')}<span>${isFav(d.id)?'В избранном':'В избранное'}</span></button>
         </div>
         <div class="src-row" id="aoSrcRow" style="--i:8"></div>
       </div>
@@ -1638,7 +1741,7 @@ async function renderDetails(view, route, alive) {
   };
   function refreshWatchAction() {
     const h = activeHistory();
-    const r = h ? resumeInfo(h.id, h._legacySeason || h.season, h.episode) : null;
+    const r = h ? historyResume(h) : null;
     const label = h?.season ? `Продолжить · ${aoNative ? 'серия ' + h.episode : h.season + '×' + h.episode}${r ? ' · ' + fmtTime(r.t) : ''}` : (r ? 'Продолжить · ' + fmtTime(r.t) : 'Смотреть');
     const b = $('#bWatch'); if (b) b.innerHTML = ico('play') + label;
   }
@@ -1646,7 +1749,7 @@ async function renderDetails(view, route, alive) {
     const row = $('#aoSrcRow'); if (!row || row.dataset.done) return;
     row.dataset.done = '1';
     d._ao = c;
-    if (!c.voiceNames.length) { if (aoNative) row.innerHTML = '<div class="hint">На Animeon видео пока не появилось</div>'; else row.remove(); return; }
+    if (!c.voiceNames.length && !c.selfHosted?.available) { if (aoNative) row.innerHTML = '<div class="hint">На Animeon видео пока не появилось</div>'; else row.remove(); return; }
     if (!d._aoSrc) d._aoSrc = getWatchPref(d, c, aoNative);
     row.innerHTML = `<div class="source-switch"><span>Источник</span><div class="seg" id="aoSrcSeg"><button data-mode="auto" class="${d._aoSrc.mode === 'auto' ? 'on' : ''}">Авто</button><button data-mode="animeon2" class="${d._aoSrc.mode === 'animeon2' ? 'on' : ''}">AnimeOn 2.0</button><button data-mode="reserve" class="${d._aoSrc.mode === 'reserve' ? 'on' : ''}">Резерв</button></div></div>`
       + '';
@@ -1663,25 +1766,18 @@ async function renderDetails(view, route, alive) {
   }
   aoPromise.then((c) => { if (c && alive()) paintAoSource(c); });
 
-  /* 3D-наклон постера */
-  const poster = $('#dPoster');
-  poster.onmousemove = (e) => {
-    const r = poster.getBoundingClientRect(); const x = (e.clientX - r.left) / r.width - .5, y = (e.clientY - r.top) / r.height - .5;
-    poster.style.transform = `perspective(800px) rotateY(${x * 12}deg) rotateX(${-y * 12}deg) scale(1.02)`;
-  };
-  poster.onmouseleave = () => { poster.style.transform = ''; };
-
   /* вкладки */
-  const tabs = [{ k: 'about', t: 'О фильме' }];
+  const tabs = [{ k: 'about', t: isAnime(d) ? 'Об аниме' : d.type === 4 ? 'О шоу' : [3, 5].includes(Number(d.type)) || isSerial ? 'О сериале' : 'О фильме' }];
   if (isSerial) tabs.push({ k: 'eps', t: 'Серии' });
   if ([6, 7].includes(d.type)) tabs.push({ k: 'franchise', t: 'Порядок франшизы' });
   if ([6, 7].includes(d.type)) tabs.push({ k: 'comments', t: 'Отзывы AnimeOn' });
+  if (isAnime(d)) tabs.push({ k: 'characters', t: 'Персонажи' });
   tabs.push({ k: 'trailers', t: 'Трейлеры' });
   if ((people.actors || []).length || (people.directors || []).length) tabs.push({ k: 'cast', t: 'Актёры' });
   if (T && (T.backdrops || []).length > 1) tabs.push({ k: 'shots', t: 'Кадры' });
   tabs.push({ k: 'more', t: T && (T.recs || []).length >= 6 ? 'Рекомендации' : 'Похожее' });
   const tb = $('#tabs');
-  tb.insertAdjacentHTML('beforeend', tabs.map((t) => `<button data-k="${t.k}">${t.t}</button>`).join(''));
+  tb.insertAdjacentHTML('beforeend', tabs.map((t) => `<button data-k="${t.k}" aria-pressed="false">${t.t}</button>`).join(''));
   const body = $('#tabBody');
   let curSeason = d._aoCurrentSeason && d._aoCurrentSeason !== '1' ? d._aoCurrentSeason
     : (last?.season && seasons.find((s) => s.season == last.season) ? last.season : (d._aoCurrentSeason || seasons[0]?.season));
@@ -1735,12 +1831,33 @@ async function renderDetails(view, route, alive) {
     const trackable = nodes.filter(x => x.inBase && x.slug && Number(x.eps) > 0);
     const finished = trackable.filter(x => animeFranchiseProgress(x, state.done, state.history).finished).length;
     const progressSummary = trackable.length ? ` · все доступные серии просмотрены: ${finished} из ${trackable.length} частей` : '';
-    const cards = (items) => items.map((x, i) => `<div class="fcard ${x.inBase && x.slug ? 'available' : ''} ${x.id === fr.currentId ? 'current' : ''}" ${x.inBase && x.slug ? `data-slug="${esc(x.slug)}"` : ''}><div class="fnum">${i + 1}</div><div class="fposter">${x.poster ? `<img loading="lazy" src="${esc(x.poster)}" alt="">` : ''}</div><b>${esc(x.name)}</b><small>${esc([x.year || '', AO_KIND[String(x.kind).toLowerCase()] || x.kind].filter(Boolean).join(' · '))}</small>${progress(x) ? `<small>${esc(progress(x))}</small>` : ''}${x.inBase && x.slug ? '' : '<em>Нет на Animeon</em>'}</div>`).join('');
-    body.innerHTML = `<div class="franchise"><div class="franchise-head"><h3>Франшиза</h3><span>${nodes.length} ${plural(nodes.length, 'тайтл', 'тайтла', 'тайтлов')} · AnimeOn${progressSummary}</span></div><h3>Связанные продолжения</h3><div class="franchise-row">${cards(primary)}</div>${side.length ? `<h3>Другие части франшизы</h3><div class="franchise-row">${cards(side)}</div>` : ''}<p class="hint franchise-note">Порядок продолжений определён по связям AnimeOn; при неоднозначных связях используется дата выхода. Прогресс учитывает число доступных серий по данным AnimeOn, а не общее число будущих серий. Остальные части могут включать ответвления и альтернативные истории.</p></div>`;
-    $$('.fcard.available', body).forEach((el) => el.onclick = () => go({ name: 'details', id: 'ao:' + el.dataset.slug }));
+    const cards = (items) => items.map((x, i) => `<div class="fcard ${x.inBase && x.slug ? 'available' : ''} ${x.id === fr.currentId ? 'current' : ''}" ${x.inBase && x.slug ? `data-slug="${esc(x.slug)}" role="button" tabindex="0"` : ''}><div class="fnum">${i + 1}</div><div class="fposter">${x.poster ? `<img loading="lazy" src="${esc(x.poster)}" alt="">` : ''}</div><b>${esc(x.name)}</b><small>${esc([x.year || '', AO_KIND[String(x.kind).toLowerCase()] || x.kind].filter(Boolean).join(' · '))}</small>${progress(x) ? `<small>${esc(progress(x))}</small>` : ''}${x.inBase && x.slug ? '' : '<em>Нет на Animeon</em>'}</div>`).join('');
+    body.innerHTML = `<div class="franchise"><div class="detail-section-head"><div><span class="catalog-eyebrow">ANIMEON</span><h2>Порядок франшизы</h2></div><span class="detail-section-count">${nodes.length} ${plural(nodes.length, 'тайтл', 'тайтла', 'тайтлов')}</span></div>${progressSummary ? `<p class="franchise-progress">${esc(progressSummary.replace(/^ · /,''))}</p>` : ''}<h3>Связанные продолжения</h3><div class="franchise-row">${cards(primary)}</div>${side.length ? `<h3>Другие части франшизы</h3><div class="franchise-row">${cards(side)}</div>` : ''}<p class="hint franchise-note">Порядок продолжений определён по связям AnimeOn; при неоднозначных связях используется дата выхода. Прогресс учитывает число доступных серий по данным AnimeOn, а не общее число будущих серий. Остальные части могут включать ответвления и альтернативные истории.</p></div>`;
+    $$('.fcard.available', body).forEach((el) => {const open=()=>{route.detailFocus=el.dataset.slug;go({ name: 'details', id: 'ao:' + el.dataset.slug });};el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}};});
+    if(route.detailFocus){const focus=$$('.fcard.available',body).find(el=>el.dataset.slug===route.detailFocus);delete route.detailFocus;focus?.focus({preventScroll:true});}
   }
 
   const panels = {
+    async characters() {
+      body.innerHTML='<div><div class="spin"></div></div>';
+      const ao=await Promise.resolve(aoPromise).catch(()=>null);
+      if(!alive()||$('#tabs .on')?.dataset.k!=='characters')return;
+      if(!ao?.shikimori){body.innerHTML='<div class="empty"><h3>Данные о персонажах пока недоступны</h3></div>';return;}
+      const result=await window.lift.shikiCharacters(ao.shikimori);
+      if(!alive()||$('#tabs .on')?.dataset.k!=='characters')return;
+      if(result.error){body.innerHTML='<div class="empty"><h3>Не удалось загрузить персонажей Shikimori</h3><p>Попробуйте открыть вкладку позже.</p></div>';return;}
+      const items=result.items||[];
+      body.innerHTML=items.length?`<div class="detail-section-head"><div><span class="catalog-eyebrow">SHIKIMORI</span><h2>Персонажи</h2></div><span class="detail-section-count">${items.length} ${plural(items.length,'персонаж','персонажа','персонажей')}</span></div><div class="character-grid">${items.map((x,i)=>`<button class="character-card" data-character="${i}"><span class="character-art">${x.image?`<img loading="lazy" src="${esc(x.image)}" alt="">`:`<span class="character-placeholder" aria-hidden="true">${esc((x.name||'?')[0])}</span>`}</span><span class="character-card-copy"><b>${esc(x.name||'Персонаж')}</b>${x.role?`<small>${esc(x.role)}</small>`:''}</span></button>`).join('')}</div>`:'<div class="empty"><h3>Персонажей пока нет</h3></div>';
+      body.querySelectorAll('[data-character]').forEach(button=>button.onclick=async()=>{
+        const item=items[Number(button.dataset.character)];if(!item)return;
+        const overlay=document.createElement('div');overlay.className='character-overlay';overlay.innerHTML=`<div class="character-dialog" role="dialog" aria-modal="true"><div class="character-dialog-art">${item.image?`<img src="${esc(item.image)}" alt="">`:''}</div><div class="character-dialog-copy"><div class="character-dialog-header"><small>ПЕРСОНАЖ · SHIKIMORI</small><h2>${esc(item.name||'Персонаж')}</h2></div><div class="character-description" tabindex="0">Загружаем описание…</div><div class="character-dialog-footer"><small>Описание может содержать спойлеры</small><button class="character-close" aria-label="Закрыть">Закрыть</button></div></div></div>`;
+        document.body.append(overlay);const onKey=e=>{if(e.key==='Escape'){e.stopPropagation();close();}};const close=()=>{document.removeEventListener('keydown',onKey,true);overlay.remove();button.focus({preventScroll:true});};document.addEventListener('keydown',onKey,true);overlay.querySelector('.character-close').onclick=close;overlay.onclick=e=>{if(e.target===overlay)close();};overlay.querySelector('.character-close').focus();
+        const details=await window.lift.shikiCharacter(item.id);if(!overlay.isConnected)return;
+        const parsed=new DOMParser().parseFromString(details.description||'','text/html');parsed.querySelectorAll('.b-spoiler_block,.b-spoiler').forEach(x=>x.remove());parsed.querySelectorAll('br').forEach(x=>x.replaceWith('\n'));const text=parsed.body.textContent.trim();
+        overlay.querySelector('.character-description').textContent=text||'Описание пока недоступно.';
+        if(details.image){const img=overlay.querySelector('.character-dialog-art img');if(img)img.src=details.image;}
+      });
+    },
     async comments() {
       body.innerHTML = '<div><div class="spin"></div></div>';
       const ao = await Promise.resolve(aoPromise).catch(() => null);
@@ -1752,17 +1869,17 @@ async function renderDetails(view, route, alive) {
         const result = await window.lift.aoComments(ao.animeId, page);
         if (!alive() || $('#tabs .on')?.dataset.k !== 'comments') return;
         if (result.error) { body.innerHTML = '<div class="empty"><h3>Отзывы временно недоступны</h3></div>'; return; }
-        body.innerHTML = `<div class="comments-list"><p class="hint">Комментарии пользователей AnimeOn могут содержать спойлеры.</p>${result.comments.map((c) => `<article class="comment-card"><b>${esc(c.author)}</b><small>${c.date && Number.isFinite(Date.parse(c.date)) ? esc(new Date(c.date).toLocaleDateString('ru-RU')) : ''} · ♥ ${c.likes}</small><p>${esc(c.body)}</p></article>`).join('') || '<p class="hint">Комментариев пока нет.</p>'}<div class="row-btns"><button class="btn ghost" id="commentPrev" ${page <= 1 ? 'disabled' : ''}>Назад</button><span class="hint">Страница ${page}</span><button class="btn ghost" id="commentNext" ${result.hasMore ? '' : 'disabled'}>Дальше</button></div></div>`;
+        body.innerHTML = `<div class="comments-list"><div class="detail-section-head"><div><span class="catalog-eyebrow">ANIMEON</span><h2>Отзывы зрителей</h2></div><span class="detail-section-count">Страница ${page}</span></div><p class="comments-note">Отзывы могут содержать спойлеры.</p><div class="comments-feed">${result.comments.map((c) => `<article class="comment-card"><div class="comment-header"><span class="comment-avatar" aria-hidden="true">${esc((c.author||'?')[0])}</span><div><b>${esc(c.author)}</b>${c.date && Number.isFinite(Date.parse(c.date)) ? `<small>${esc(new Date(c.date).toLocaleDateString('ru-RU'))}</small>` : ''}</div><span class="comment-likes" aria-label="Отметки нравится">♥ ${esc(c.likes)}</span></div><p>${esc(c.body)}</p></article>`).join('') || '<p class="hint">Комментариев пока нет.</p>'}</div><div class="row-btns comment-pagination"><button class="btn ghost" id="commentPrev" ${page <= 1 ? 'disabled' : ''}>Назад</button><span class="hint">Страница ${page}</span><button class="btn ghost" id="commentNext" ${result.hasMore ? '' : 'disabled'}>Дальше</button></div></div>`;
         $('#commentPrev', body).onclick = () => { page--; load(); };
         $('#commentNext', body).onclick = () => { page++; load(); };
       };
       load();
     },
     about() {
-      const description = d._ao?.description || inf.description || 'Описание пока не добавили.';
+      const description = d._ao?.description || inf.description || T?.overview || 'Описание пока не добавили.';
       const paragraphs = String(description).split(/\n\s*\n/).map((p) => p.trim()).filter(Boolean);
       const highlights = d._ao?.highlights || [], faq = d._ao?.faq || [];
-      body.innerHTML = `<div><div class="desc">${paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')}</div>${d._ao?.description ? '<p class="hint">Описание: AnimeOn</p>' : ''}
+      body.innerHTML = `<div><div class="desc">${paragraphs.map((p) => `<p>${esc(p)}</p>`).join('')}</div>${d._ao?.description ? '<p class="hint">Описание: AnimeOn</p>' : !inf.description&&T?.overview ? '<p class="hint">Описание: TMDB</p>' : ''}
         ${highlights.length ? `<section class="ao-about-extra"><h3>Особенности</h3><ul class="ao-highlights">${highlights.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></section>` : ''}
         ${faq.length ? `<section class="ao-about-extra"><h3>Частые вопросы</h3><div class="ao-faq">${faq.map(x=>`<details><summary>${esc(x.question)}</summary><p>${esc(x.answer)}</p></details>`).join('')}</div></section>` : ''}
         <div class="facts">
@@ -1772,15 +1889,26 @@ async function renderDetails(view, route, alive) {
         </div>
         ${(inf.trivia || []).length ? `<div class="trivia"><h3>Интересные факты</h3><ul>${inf.trivia.slice(0, 6).map((t) => `<li>${esc(t)}</li>`).join('')}</ul></div>` : ''}</div>`;
     },
-    eps() {
+    async eps() {
       const seasonObj = seasons.find((s) => s.season == curSeason) || seasons[0];
-      const watch = activeWatch();
-      const watched = activeHistory();
+      const watch = activeWatch(), watched = activeHistory();
       const seen = state.seen[watch.id + ':' + seasonObj.season] || [];
-      body.innerHTML = `<div>${aoNative && seasons.length === 1 ? '' : `<div class="seasons">${seasons.map((s) => `<button class="pill ${s.season == seasonObj.season ? 'on' : ''}" data-s="${s.season}">Сезон ${s.season}</button>`).join('')}</div>`}
-        <div class="eps">${seasonObj.episodes.map((e) => `<button class="ep ${seen.includes(String(e)) ? 'seen' : ''} ${isDone(watch.id, seasonObj.season, e) ? 'done' : ''} ${watched && watched.season == seasonObj.season && watched.episode == e ? 'cur' : ''}" data-e="${e}" style="animation:viewIn .5s var(--ease) both;animation-delay:${Math.min(+e, 30) * 14}ms">${e}${!isDone(watch.id, seasonObj.season, e) && progressPct(watch.id, seasonObj.season, e) ? `<i class="epbar" style="width:${progressPct(watch.id, seasonObj.season, e)}%"></i>` : ''}</button>`).join('')}</div></div>`;
-      $$('.seasons .pill', body).forEach((b) => b.onclick = () => { curSeason = b.dataset.s; panels.eps(); });
-      $$('.ep', body).forEach((b) => b.onclick = () => playItem(d, seasons, seasonObj.season, b.dataset.e));
+      body.innerHTML = `<div class="episode-section"><div class="detail-section-head"><div><span class="catalog-eyebrow">ДЛЯ ПРОСМОТРА</span><h2>Серии</h2></div><span class="detail-section-count">${seasonObj.episodes.length} ${plural(seasonObj.episodes.length,'серия','серии','серий')}</span></div>${aoNative && seasons.length === 1 ? '' : `<div class="seasons">${seasons.map((s) => `<button class="pill ${s.season == seasonObj.season ? 'on' : ''}" data-s="${s.season}">Сезон ${s.season}</button>`).join('')}</div>`}<div class="episode-cards">${seasonObj.episodes.map(e => `<button class="episode-card ${seen.includes(String(e)) ? 'seen' : ''} ${isDone(watch.id, seasonObj.season, e) ? 'done' : ''} ${watched && watched.season == seasonObj.season && watched.episode == e ? 'cur' : ''}" data-e="${e}"><span class="episode-image"><span class="episode-placeholder">${e}</span><span class="episode-play">▶</span>${!isDone(watch.id, seasonObj.season, e) && progressPct(watch.id, seasonObj.season, e) ? `<i class="epbar" style="width:${progressPct(watch.id, seasonObj.season, e)}%"></i>` : ''}</span><small class="episode-meta hidden">Серия ${e}</small><b class="episode-name">Серия ${e}</b>${isDone(watch.id, seasonObj.season, e) ? '<span class="episode-state">Просмотрено</span>' : watched && watched.season == seasonObj.season && watched.episode == e ? '<span class="episode-state">Продолжить</span>' : ''}</button>`).join('')}</div></div>`;
+      $$('.seasons .pill', body).forEach(b => b.onclick = () => { curSeason = b.dataset.s; panels.eps(); });
+      $$('.episode-card', body).forEach(b => b.onclick = () => playItem(d, seasons, seasonObj.season, b.dataset.e));
+      if (aoNative) for (const card of $$('.episode-card', body)) { const urls=d._ao?.episodeStillAlternatives?.[card.dataset.e] || [d._ao?.episodeStills?.[card.dataset.e]].filter(Boolean); if(!urls.length)continue;let i=0;const img=new Image();img.loading='lazy';img.alt='';img.onerror=()=>{if(++i<urls.length)img.src=urls[i];else img.remove()};img.src=urls[0];$('.episode-image',card).prepend(img); }
+      // AnimeOn releases use their own season numbering; do not attach TMDB episodes to them by guesswork.
+      if (!T?.tmdb || T.kind !== 'tv' || isAnime(d)) return;
+      const rows = await window.lift.tmdbSeasonEpisodes({id:T.tmdb,season:seasonObj.season}).catch(() => []);
+      if (!alive() || $('#tabs .on')?.dataset.k !== 'eps' || String(curSeason) !== String(seasonObj.season)) return;
+      for (const row of rows) {
+        const card = body.querySelector(`.episode-card[data-e="${Number(row.number)}"]`); if (!card) continue;
+        const title = String(row.name || '').trim(); if (title) $('.episode-name',card).textContent = title;
+        const date = /^\d{4}-\d{2}-\d{2}$/.test(row.date) ? new Date(row.date+'T12:00:00').toLocaleDateString('ru-RU',{day:'numeric',month:'short',year:'numeric'}) : '';
+        const meta=$('.episode-meta',card); meta.textContent = ['Серия '+row.number,date].filter(Boolean).join(' · '); meta.classList.toggle('hidden', !date && (!title || title.toLowerCase() === ('серия '+row.number).toLowerCase()));
+        if (row.still) { const img = document.createElement('img'); img.loading='lazy'; img.alt=''; img.src=TMG(row.still,'w500'); img.onerror=()=>img.remove(); $('.episode-image',card).prepend(img); }
+        if (row.runtime) $('.episode-image',card).insertAdjacentHTML('beforeend',`<span class="episode-runtime">${Number(row.runtime)} мин.</span>`);
+      }
     },
     async franchise() {
       body.innerHTML = '<div><div class="spin"></div></div>';
@@ -1797,35 +1925,37 @@ async function renderDetails(view, route, alive) {
         return;
       }
       const rel = { CURRENT: 'Вы здесь', PREQUEL: 'Предыстория', SEQUEL: 'Продолжение', SIDE_STORY: 'Ответвление', ALTERNATIVE: 'Альтернатива', SUMMARY: 'Краткое содержание' };
-      body.innerHTML = `<div class="franchise"><div class="franchise-head"><h3>${esc(r.title)}</h3><span>${r.items.length} тайтл${r.items.length === 1 ? '' : r.items.length < 5 ? 'а' : 'ов'} · по дате выхода</span></div><div class="franchise-row">${r.items.map((x, i) => `<div class="fcard ${x.item ? 'available' : ''} ${x.relation === 'CURRENT' ? 'current' : ''}" ${x.item ? `data-id="${x.item.id}"` : ''} title="${x.item ? 'Открыть в Luma' : 'Пока нет в каталоге Luma'}"><div class="fnum">${i + 1}</div><div class="fposter">${x.poster ? `<img src="${esc(x.item?.poster || x.poster)}" alt="">` : ''}</div><b>${esc(x.item?.name || x.title)}</b><small>${esc([x.year || '', rel[x.relation] || 'Связанный тайтл'].filter(Boolean).join(' · '))}</small>${x.item ? '' : '<em>Нет в Luma</em>'}</div>`).join('')}</div><p class="hint franchise-note">Порядок и связи — AniList; доступны для открытия только тайтлы, уже присутствующие в Luma.</p></div>`;
+      body.innerHTML = `<div class="franchise"><div class="detail-section-head"><div><span class="catalog-eyebrow">ANILIST · ПО ДАТЕ ВЫХОДА</span><h2>${esc(r.title)}</h2></div><span class="detail-section-count">${r.items.length} ${plural(r.items.length,'тайтл','тайтла','тайтлов')}</span></div><div class="franchise-row">${r.items.map((x, i) => `<div class="fcard ${x.item ? 'available' : ''} ${x.relation === 'CURRENT' ? 'current' : ''}" ${x.item ? `data-id="${x.item.id}" role="button" tabindex="0"` : ''} title="${x.item ? 'Открыть в Luma' : 'Пока нет в каталоге Luma'}"><div class="fnum">${i + 1}</div><div class="fposter">${x.poster ? `<img src="${esc(x.item?.poster || x.poster)}" alt="">` : ''}</div><b>${esc(x.item?.name || x.title)}</b><small>${esc([x.year || '', rel[x.relation] || 'Связанный тайтл'].filter(Boolean).join(' · '))}</small>${x.item ? '' : '<em>Нет в Luma</em>'}</div>`).join('')}</div><p class="hint franchise-note">Порядок и связи — AniList; доступны для открытия только тайтлы, уже присутствующие в Luma.</p></div>`;
       wireCards(body);
-      $$('.fcard.available', body).forEach((el) => el.onclick = () => go({ name: 'details', id: +el.dataset.id }));
+      $$('.fcard.available', body).forEach((el) => {const open=()=>go({ name: 'details', id: +el.dataset.id });el.onclick=open;el.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();open();}};});
     },
     async trailers() {
       body.innerHTML = '<div><div class="spin"></div></div>';
       loaded.tr = loaded.tr || window.lift.trailers({ name: d.name, origin: d.origin_name || inf.name_eng, year: d.year, tmdb: T?.tmdb, kind: T?.kind });
       const list = await loaded.tr;
       if (!alive() || $('#tabs .on')?.dataset.k !== 'trailers') return;
-      body.innerHTML = list.length ? `<div class="trailers">${list.map((t, i) => `<div class="tr" data-i="${i}" style="animation:viewIn .55s var(--ease) both;animation-delay:${i * 60}ms"><div class="th" style="background-image:url('${esc(t.thumb)}')"></div><div class="tt">${esc(t.title)}</div><span class="src ${t.src}">${t.src === 'rutube' ? 'RUTUBE' : 'YOUTUBE'}</span></div>`).join('')}</div>`
+      body.innerHTML = list.length ? `<div><div class="detail-section-head"><div><span class="catalog-eyebrow">ВИДЕО</span><h2>Трейлеры</h2></div><span class="detail-section-count">${list.length} ${plural(list.length,'видео','видео','видео')}</span></div><div class="trailers">${list.map((t, i) => `<button class="tr" data-i="${i}"><span class="th" style="background-image:url('${esc(t.thumb)}')"></span><span class="tt">${esc(t.title)}</span><span class="src ${t.src}">${t.src === 'rutube' ? 'RUTUBE' : 'YOUTUBE'}</span></button>`).join('')}</div></div>`
         : '<div class="empty"><h3>Трейлеров пока нет</h3></div>';
       $$('.tr', body).forEach((el) => el.onclick = () => openTrailer(list[+el.dataset.i]));
       loaded.trList = list;
     },
     cast() {
-      const row = (title, arr, role) => arr?.length ? `<div class="people"><h3>${title}</h3><div class="people-row">${arr.map((p) => `<div class="person" data-pid="${p.id}" title="Фильмы с участием: ${esc(p.name)}"><div class="ph">${p.avatar_url ? `<img loading="lazy" src="${esc(p.avatar_url)}" alt="">` : esc((p.name || '?')[0])}</div><b>${esc(p.name)}</b>${role && p.characters?.[0] ? `<small>${esc(p.characters[0])}</small>` : ''}</div>`).join('')}</div></div>` : '';
-      body.innerHTML = `<div>${row('Режиссёры', people.directors)}${row('В ролях', people.actors, true)}</div>`;
+      const cast = [...(people.directors || []).map(p => ({ person:p, role:'Режиссёр' })), ...(people.actors || []).map(p => ({ person:p, role:p.characters?.[0] || 'Актёр' }))];
+      body.innerHTML = `<div><div class="detail-section-head"><div><span class="catalog-eyebrow">СОЗДАТЕЛИ</span><h2>Актёры и съёмочная группа</h2></div><span class="detail-section-count">${cast.length} ${plural(cast.length,'человек','человека','человек')}</span></div><section class="people"><div class="people-row">${cast.map(({person:p,role}) => `<button class="person" data-pid="${p.id}" aria-label="Открыть страницу: ${esc(p.name)}"><span class="ph">${p.avatar_url ? `<img loading="lazy" src="${esc(p.avatar_url)}" alt="">` : esc((p.name || '?')[0])}</span><span class="person-copy"><b>${esc(p.name)}</b><small>${esc(role)}</small></span></button>`).join('')}</div></section></div>`;
     },
     shots() {
-      body.innerHTML = `<div><div class="shots">${tmShots.map((p, i) => `<div class="shot" data-i="${i}" style="animation:viewIn .55s var(--ease) both;animation-delay:${Math.min(i, 12) * 40}ms"><img loading="lazy" src="${TMG(p, 'w780')}" alt=""></div>`).join('')}</div></div>`;
+      body.innerHTML = `<div><div class="detail-section-head"><div><span class="catalog-eyebrow">TMDB</span><h2>Кадры</h2></div><span class="detail-section-count">${tmShots.length} ${plural(tmShots.length,'кадр','кадра','кадров')}</span></div><div class="shots">${tmShots.map((p, i) => `<button class="shot" data-i="${i}" aria-label="Открыть кадр ${i + 1}"><img loading="lazy" src="${TMG(p, 'w780')}" alt=""></button>`).join('')}</div></div>`;
       $$('.shot', body).forEach((el) => el.onclick = () => openLightbox(tmShots.map((p) => TMG(p, 'original')), +el.dataset.i));
     },
     async more() {
       if (aoNative) {
         body.innerHTML = '<div><div class="spin"></div></div>';
-        const r = await window.lift.aoCatalog({ page:1, limit:24, sort:'popular', genre:(inf.genre || [])[0] || '' }).catch(() => ({ items:[] }));
+        const r = await window.lift.aoCatalog({ page:1, limit:24, sort:'popular', genre:(inf.genre || [])[0] || '' }).catch(() => ({ error:'NETWORK', items:[] }));
         if (!alive() || $('#tabs .on')?.dataset.k !== 'more') return;
-        const items = (r.items || []).filter(x => x.slug !== d._ao?.slug).map(aoListToLuma);
-        body.innerHTML = items.length ? `<div><div class="sec-head" style="padding:0"><h2>Аниме того же жанра</h2></div><div class="grid" style="padding:14px 0">${items.map((x,i)=>cardHTML(x,i)).join('')}</div></div>` : '<div class="empty"><h3>Подборка временно недоступна</h3></div>';
+        if(r.error){body.innerHTML='<div class="empty"><h3>Не удалось загрузить похожее аниме</h3><button class="btn ghost" data-more-retry>Повторить</button></div>';body.querySelector('[data-more-retry]').onclick=()=>panels.more();return;}
+        const norm=x=>String(x||'').trim().toLocaleLowerCase('ru-RU'),genres=new Set((inf.genre||[]).map(norm)),parts=new Set([d._ao?.slug,...(d._ao?.franchise?.nodes||[]).map(x=>x.slug)].filter(Boolean));
+        const items = (r.items || []).filter(x => !parts.has(x.slug)).map((x,i)=>({x,i,overlap:(x.genres||[]).filter(g=>genres.has(norm(g))).length})).filter(x=>!genres.size||x.overlap>0).sort((a,b)=>b.overlap-a.overlap||a.i-b.i).map(({x})=>aoListToLuma(x));
+        body.innerHTML = items.length ? `<div><div class="sec-head" style="padding:0"><h2>Похожие по жанрам · AnimeOn</h2></div><p class="hint">Сначала тайтлы с большим числом общих жанров.</p><div class="grid" style="padding:14px 0">${items.map((x,i)=>cardHTML(x,i)).join('')}</div></div>` : '<div class="empty"><h3>Похожих аниме пока не найдено</h3></div>';
         wireCards(body); return;
       }
       body.innerHTML = `<div><div id="partsWrap"></div><div id="simWrap"><div class="spin"></div></div></div>`;
@@ -1867,33 +1997,37 @@ async function renderDetails(view, route, alive) {
   };
   const ind = $('.ind', tb);
   const selTab = (k) => {
-    $$('button', tb).forEach((b) => b.classList.toggle('on', b.dataset.k === k));
+    route.detailTab = k;
+    $$('button', tb).forEach((b) => { const selected = b.dataset.k === k; b.classList.toggle('on', selected); b.setAttribute('aria-pressed', String(selected)); });
     const b = $('button.on', tb); ind.style.left = b.offsetLeft + 'px'; ind.style.width = b.offsetWidth + 'px';
     panels[k]();
   };
   tb.onclick = (e) => { const b = e.target.closest('button'); if (b) selTab(b.dataset.k); };
-  requestAnimationFrame(() => selTab(isSerial && last?.season ? 'eps' : 'about'));
+  tb.addEventListener('wheel', (e) => { if (tb.scrollWidth <= tb.clientWidth || !e.deltaY || e.deltaX) return; const before = tb.scrollLeft; tb.scrollLeft += e.deltaY; if (tb.scrollLeft !== before) e.preventDefault(); }, { passive: false });
+  requestAnimationFrame(() => selTab(tabs.some(x=>x.k===route.detailTab) ? route.detailTab : isSerial && last?.season ? 'eps' : 'about'));
 
+  const rememberedSourceOpts = h => !sourceManuallySelected&&h?.source==='vk'&&/^-?\d+_\d+$/.test(h.vkId||'')?{vkVideo:{id:h.vkId}}:!sourceManuallySelected&&h?.source==='rutube'&&/^[a-f0-9]{32}$/i.test(h.rutubeId||'')?{rutubeVideo:{id:h.rutubeId,duration:h.rutubeDuration||0,voice:h.voice||''}}:{};
   const bs = $('#bStart');
   if (bs) bs.onclick = () => {
-    const h = activeHistory();
-    if (isSerial) { const remembered = seasons.find(x => x.season == h?.season && x.episodes.some(e => e == h?.episode)); const fallback = seasons.find(x => x.season == d._aoCurrentSeason) || seasons[0]; playItem(d, seasons, remembered?.season || fallback.season, remembered ? h.episode : fallback.episodes[0], { fromStart: true }); }
-    else playItem(d, seasons, undefined, undefined, { fromStart: true });
+    const h = activeHistory(), sourceOpts = rememberedSourceOpts(h);
+    if (isSerial) { const remembered = seasons.find(x => x.season == h?.season && x.episodes.some(e => e == h?.episode)); const fallback = seasons.find(x => x.season == d._aoCurrentSeason) || seasons[0]; playItem(d, seasons, remembered?.season || fallback.season, remembered ? h.episode : fallback.episodes[0], { ...sourceOpts, fromStart: true }); }
+    else playItem(d, seasons, undefined, undefined, { ...sourceOpts, fromStart: true });
   };
   $('#bWatch').onclick = () => {
     const h = activeHistory();
-    const opts = !sourceManuallySelected && h?.source === 'rutube' && /^[a-f0-9]{32}$/i.test(h.rutubeId || '') ? { rutubeVideo:{id:h.rutubeId,duration:h.rutubeDuration||0,voice:h.voice||''} } : {};
+    const opts = !sourceManuallySelected && h?.source === 'vk' && /^-?\d+_\d+$/.test(h.vkId||'') ? { vkVideo:{id:h.vkId} } : !sourceManuallySelected && h?.source === 'rutube' && /^[a-f0-9]{32}$/i.test(h.rutubeId || '') ? { rutubeVideo:{id:h.rutubeId,duration:h.rutubeDuration||0,voice:h.voice||''} } : {};
     if (isSerial) { const remembered = seasons.find(x => x.season == h?.season && x.episodes.some(e => e == h?.episode)); const fallback = seasons.find(x => x.season == d._aoCurrentSeason) || seasons[0], s = remembered?.season || fallback.season, e = remembered ? h.episode : fallback.episodes[0]; if (h?.season && !remembered) toast('Сохранённая серия недоступна, открыт первый доступный эпизод'); playItem(d, seasons, s, e, opts); }
     else playItem(d, seasons, undefined, undefined, opts);
   };
-  $('#bRutube').onclick = () => { const h=activeHistory(), s=seasons.find(x=>x.season==curSeason) || seasons[0]; chooseRutube(d,seasons,s?.season,(h?.season==s?.season ? h?.episode : null) || s?.episodes?.[0]); };
+  $('#bVk').onclick = () => { const h=activeHistory(), s=seasons.find(x=>x.season==curSeason) || seasons[0]; chooseVideoSource('vk',d,seasons,s?.season,(h?.season==s?.season ? h?.episode : null) || s?.episodes?.[0]); };
+  $('#bRutube').onclick = () => { const h=activeHistory(), s=seasons.find(x=>x.season==curSeason) || seasons[0]; chooseVideoSource('rutube',d,seasons,s?.season,(h?.season==s?.season ? h?.episode : null) || s?.episodes?.[0]); };
   $('#bTrailer').onclick = async () => {
     const b = $('#bTrailer'); b.style.opacity = .6;
     loaded.tr = loaded.tr || window.lift.trailers({ name: d.name, origin: d.origin_name || inf.name_eng, year: d.year, tmdb: T?.tmdb, kind: T?.kind });
     const l = await loaded.tr; b.style.opacity = 1;
     if (l.length) openTrailer(l[0]); else toast('Трейлера пока нет');
   };
-  $('#bFav').onclick = () => { $('#bFav').classList.toggle('on', toggleFav(d)); };
+  $('#bFav').onclick = () => { const b=$('#bFav'),on=toggleFav(d),label=on?'В избранном':'В избранное';b.classList.toggle('on',on);b.setAttribute('aria-pressed',String(on));b.setAttribute('aria-label',label);b.querySelector('span').textContent=label; };
   $('#bTorr').onclick = () => go({ name: 'torrents', id: d.id });
   if(route.autoplay && alive()){route.autoplay=false;$('#bWatch').click();}
 }
@@ -1907,17 +2041,22 @@ async function openDetailsAndPlay(it) {
 
 /* ================= запоминание места просмотра ================= */
 const progKey = (id, season, episode) => (season ? `${id}:${season}:${episode}` : String(id));
+const sourceProgressKey=(source,videoId,id,season,episode)=>`${source}~${videoId}~${progKey(id,season,episode)}`;
+function sourceResumeInfo(source,videoId,id,season,episode){const key=sourceProgressKey(source,videoId,id,season,episode),p=state.progress[key];if(p&&p.t>=10&&p.d&&p.t<p.d-45)return p;if(state.sourceHistory[key])return null;const h=state.history.find(x=>String(x.id)===String(id)&&x.source===source&&(source==='vk'?x.vkId===videoId:x.rutubeId===videoId)&&String(x.season??'')===String(season??'')&&String(x.episode??'')===String(episode??''));const old=h?resumeInfo(id,season,episode):null;if(old)state.progress[key]={...old};return old;}
+function rememberSource(source,videoId,d,watch,season,episode){const key=sourceProgressKey(source,videoId,watch.id,season,episode);state.sourceHistory[key]={...brief(d,watch),season,episode,ts:Date.now()};const keys=Object.keys(state.sourceHistory);if(keys.length>400)keys.sort((a,b)=>(state.sourceHistory[a].ts||0)-(state.sourceHistory[b].ts||0)).slice(0,keys.length-400).forEach(k=>delete state.sourceHistory[k]);persist('sourceHistory');}
 const fmtTime = (s) => { s = Math.max(0, Math.floor(s)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), x = s % 60; return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(x).padStart(2, '0'); };
 // позиция, с которой стоит продолжить (null — смотреть с начала)
 function resumeInfo(id, season, episode) {
   const p = state.progress[progKey(id, season, episode)];
   return p && p.t >= 10 && p.d && p.t < p.d - 45 ? p : null;
 }
+function historyResume(h){if(!h)return null;const season=h._legacySeason||h.season;return h.source==='vk'&&h.vkId?sourceResumeInfo('vk',h.vkId,h.id,season,h.episode):h.source==='rutube'&&h.rutubeId?sourceResumeInfo('rutube',h.rutubeId,h.id,season,h.episode):resumeInfo(h.id,season,h.episode);}
+function historyProgressPct(h){const p=historyResume(h);return p?Math.min(100,Math.round(p.t/p.d*100)):0;}
 const progressPct = (id, season, episode) => { const p = resumeInfo(id, season, episode); return p ? Math.min(100, Math.round((p.t / p.d) * 100)) : 0; };
 let progSaveAt = 0, adActive = false, progTimer = null;
 function storeProgress(key, t, d) {
   if (!key || !isFinite(t) || !isFinite(d) || d < 120) return;
-  if (t > d - 45) { delete state.progress[key]; const m = !key.includes(':torr:') && /^(.+):([^:]+):([^:]+)$/.exec(key); if (m) markDone(m[1], m[2], m[3]); }   // досмотрели
+  if (t > d - 45) { delete state.progress[key]; const m = !key.includes(':torr:') && /^(.+):([^:]+):([^:]+)$/.exec(String(key).replace(/^(?:vk|rutube)~[^~]+~/,'')); if (m) markDone(m[1], m[2], m[3]); }   // досмотрели
   else if (t >= 5) state.progress[key] = { t: Math.floor(t), d: Math.floor(d), ts: Date.now() };
   else return;
   const keys = Object.keys(state.progress);
@@ -1926,10 +2065,10 @@ function storeProgress(key, t, d) {
 }
 // точное время берём прямо из видео в плеере (через основной процесс), а не ждём сообщений
 async function captureProgress() {
-  if (!playing || adActive) return;
+  if (!playing || adActive || playing.kodikPending) return;
   const key = playing.key;
   const own = PL.time();   // состояние плеера приходит от моста 4 раза в секунду
-  if (own) { if (Date.now() - progSaveAt > 4000) storeProgress(key, own.t, own.d); return; }
+  if (own) { if (playing.sourceHistoryPending && !own.p && !own.wait && !own.err && own.t > 0.5) { const pending=playing.sourceHistoryPending; playing.sourceHistoryPending=null; addHistory(playing.d,playing.season,playing.episode,playing.watch); rememberSource(pending.source,pending.id,playing.d,playing.watch,playing.season,playing.episode); } if (Date.now() - progSaveAt > 4000) storeProgress(key, own.t, own.d); return; }
   if (playing.isTorr) return;
   // У Kodik видео может жить ещё на один iframe глубже: postMessage оттуда
   // не всегда доходит до нашей страницы. Получаем состояние напрямую через
@@ -1955,8 +2094,9 @@ window.addEventListener('message', (e) => {
     return;
   }
   if (e.source !== fr.contentWindow) return;
-  if (m.event === 'playerReady') $('.pl-loader').classList.add('done');
+  if (m.event === 'playerReady') { if (!playing.kodikPending || playing.kodikDirect) $('.pl-loader').classList.add('done'); }
   else if (m.event === 'playerError') {
+    if (playing.kodikPending && !playing.kodikDirect) return;
     if (playing?.rutube && !playing.rutubeFallback) {
       playing.rutubeFallback = true;
       const page = new URL('rutube-player.html', window.location.href);
@@ -1971,7 +2111,7 @@ window.addEventListener('message', (e) => {
   else if (m.event === 'adStart') { adActive = true; PL.setAd(true); }
   else if (m.event === 'adStop') { adActive = false; PL.setAd(false); }
   else if (m.event === 'changeEpisode') onEpisodeChanged(m);
-  else if (m.event === 'viewProgress' && !adActive && Date.now() - progSaveAt > 4000) storeProgress(playing.key, Number(m.time), Number(m.duration));
+  else if (m.event === 'viewProgress' && !adActive && !playing.kodikPending && Date.now() - progSaveAt > 4000) storeProgress(playing.key, Number(m.time), Number(m.duration));
   else if (m.event === 'ended') storeProgress(playing.key, Number(m.duration) || 1e9, Number(m.duration) || 1e9);
 });
 
@@ -2005,18 +2145,28 @@ function showAnimeonAuthGate(title) {
   $('#plFrame').src = 'about:blank';
   $('.pl-loader').classList.add('done');
   $('#aoAuthGate').classList.remove('hidden');
+  $('#aoAuthPasswordGate').focus({preventScroll:true});
 }
 $('#aoAuthCloseGate').onclick = () => { $('#aoAuthGate').classList.add('hidden'); closePlayer(); };
 $('#aoAuthPasswordGate').onclick = async () => { $('#aoAuthGate').classList.add('hidden'); await closePlayer(); go({name:'settings',tab:'keys',auth:'password'}); };
 let playRequestToken = 0;
+function chooseVideoSource(provider,d,seasons,season,episode){
+  document.querySelector('#sourceChooser [data-close]')?.click();let chosenSeason=season,chosenEpisode=episode,seq=0;const label=provider==='vk'?'VK Видео':'Rutube',watchId=watchIdFor(d,provider,d._ao),logo=document.querySelector('.det-logo')?.src||'',backdrop=document.querySelector('.det-bg .cine-frame.on')?.src||'';
+  const modal=document.createElement('div');modal.id='sourceChooser';modal.className='source-choose';modal.innerHTML=`<div class="source-panel" role="dialog" aria-modal="true" aria-label="Выбор видео ${esc(label)}"><div class="source-hero"><div class="source-hero-art"></div><div class="source-hero-copy"><span class="source-eyebrow"><img src="${provider==='vk'?'assets/vk-video.svg':'assets/rutube-icon.svg'}" alt="">${esc(label)} · ПОИСК ВИДЕО</span>${logo?`<img class="source-logo" src="${esc(logo)}" alt="${esc(d.name)}">`:`<h2>${esc(d.name)}</h2>`}<p>Выберите подходящий ролик. Озвучка зависит от видео.</p><div class="source-filters">${seasons.length?`<select data-season aria-label="Сезон">${seasons.map(x=>`<option value="${esc(x.season)}" ${String(x.season)===String(chosenSeason)?'selected':''}>Сезон ${esc(x.season)}</option>`).join('')}</select><select data-episode aria-label="Серия"></select>`:''}<input data-voice placeholder="Озвучка или студия" aria-label="Озвучка или студия"><button class="btn ghost" data-search>Найти</button></div></div><button class="source-close" data-close aria-label="Закрыть">×</button></div><div class="source-result-head"><div><h3>Найденные видео</h3><p>Проверьте название и продолжительность</p></div><span data-count></span></div><div class="source-results"><div class="spin"></div></div></div>`;
+  document.body.append(modal);if(backdrop)modal.querySelector('.source-hero-art').style.backgroundImage=`url("${backdrop.replace(/["\\]/g,'')}")`;const priorFocus=document.activeElement;const onKey=e=>{if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();close();}};const close=()=>{document.removeEventListener('keydown',onKey,true);modal.remove();priorFocus?.focus?.();};document.addEventListener('keydown',onKey,true);modal.querySelector('[data-close]').onclick=close;modal.onclick=e=>{if(e.target===modal)close()};
+  const episodeSelect=modal.querySelector('[data-episode]');const fillEpisodes=()=>{if(!episodeSelect)return;const list=seasons.find(x=>String(x.season)===String(chosenSeason))?.episodes||[];if(!list.some(x=>String(x)===String(chosenEpisode)))chosenEpisode=list[0];episodeSelect.innerHTML=list.map(x=>`<option value="${esc(x)}" ${String(x)===String(chosenEpisode)?'selected':''}>Серия ${esc(x)}</option>`).join('')};fillEpisodes();
+  const load=async()=>{const n=++seq,list=modal.querySelector('.source-results');list.innerHTML='<div class="spin"></div>';const title=d._ao?.franchise?.nodes?.find(x=>String(x.id)===String(d._ao.franchise.currentId))?.name||d.name,input={title,episode:chosenEpisode,season:String(d.id).startsWith('ao:')?undefined:chosenSeason,voice:modal.querySelector('[data-voice]').value},data=await (provider==='vk'?window.lift.vkSearch(input):window.lift.rutubeSearch(input)).catch(()=>({error:'NETWORK'}));if(!modal.isConnected||n!==seq)return;modal.querySelector('[data-count]').textContent=data.items?.length ? `${data.items.length} ${plural(data.items.length,'видео','видео','видео')}` : '';if(data.error){list.innerHTML=`<div class="source-error"><p class="hint">${esc(label)} временно недоступен.</p><button class="btn ghost" data-source-retry>Повторить поиск</button></div>`;list.querySelector('[data-source-retry]').onclick=load;return;}if(!data.items?.length){list.innerHTML=`<p class="hint">Подходящие ролики не найдены. Попробуйте изменить озвучку${seasons.length?' или выбрать другую серию':''}.</p>`;return;}list.innerHTML=data.items.map((x,i)=>{const p=sourceResumeInfo(provider,x.id,watchId,chosenSeason,chosenEpisode);return `<button class="source-result" data-i="${i}"><span class="source-thumb">${x.image?`<img src="${esc(x.image)}" alt="">`:'<i>▶</i>'}<span class="source-quality" data-quality="${i}" ${x.quality?'':'hidden'}>${x.quality?'до '+x.quality+'p':''}</span>${x.duration?`<em>${fmtTime(x.duration)}</em>`:''}</span><span class="source-copy"><b>${esc(x.title)}</b><small>${x.channelImage?`<img src="${esc(x.channelImage)}" alt="">`:''}${esc(x.channel||'Канал не указан')} · ${esc(label)}${x.extra?' · Другой формат':''}${x.ambiguous?' · Уточните название':''}</small>${p?`<strong>Продолжить · ${fmtTime(p.t)}</strong>`:''}</span></button>`}).join('');list.onclick=e=>{const b=e.target.closest('[data-i]');if(!b)return;const x=data.items[Number(b.dataset.i)];close();playItem(d,seasons,chosenSeason,chosenEpisode,provider==='vk'?{vkVideo:x}:{rutubeVideo:x});};if(provider==='rutube'){let cursor=0;Promise.all(Array.from({length:Math.min(3,data.items.length)},async()=>{while(cursor<data.items.length&&modal.isConnected&&n===seq){const i=cursor++,q=await window.lift.rutubeQuality(data.items[i].id).catch(()=>0);if(!modal.isConnected||n!==seq)return;const badge=list.querySelector(`[data-quality="${i}"]`);if(badge&&q){badge.textContent='до '+q+'p';badge.hidden=false;}}}));}};
+  modal.querySelector('[data-search]').onclick=load;modal.querySelector('[data-season]')?.addEventListener('change',e=>{chosenSeason=e.target.value;fillEpisodes();load()});episodeSelect?.addEventListener('change',e=>{chosenEpisode=e.target.value;load()});modal.querySelector('[data-voice]').onkeydown=e=>{if(e.key==='Enter')load();if(e.key==='Escape'){e.stopPropagation();close()}};load();
+}
 function chooseRutube(d, seasons, season, episode) {
-  document.getElementById('rutubeChooser')?.remove();
+  document.querySelector('#rutubeChooser [data-close]')?.click();
   let chosenEpisode=episode;
   const seasonData=seasons.find(x=>String(x.season)===String(season));
   const modal=document.createElement('div'); modal.id='rutubeChooser'; modal.className='rt-choose';
-  modal.innerHTML=`<div class="rt-panel" role="dialog" aria-modal="true" aria-label="Выбор видео Rutube"><div class="rt-head"><h3>Rutube</h3><button class="btn ghost" data-close>Закрыть</button></div><p class="hint">Выберите подходящий ролик. Озвучка указана, только если она известна из названия.</p><div class="rt-search">${seasonData ? `<select data-episode aria-label="Серия">${seasonData.episodes.map(e=>`<option value="${esc(e)}" ${String(e)===String(episode)?'selected':''}>Серия ${esc(e)}</option>`).join('')}</select>` : ''}<input placeholder="Озвучка или студия (необязательно)" aria-label="Поиск озвучки"><button class="btn ghost" data-search>Найти</button></div><div class="rt-list"><div class="spin"></div></div></div>`;
-  document.body.appendChild(modal); let seq=0;
-  const close=()=>modal.remove(); modal.querySelector('[data-close]').onclick=close; modal.onclick=e=>{if(e.target===modal)close()};
+  modal.innerHTML=`<div class="rt-panel" role="dialog" aria-modal="true" aria-label="Выбор видео Rutube"><div class="rt-head"><div><span class="source-eyebrow"><img src="assets/rutube-icon.svg" alt="">RUTUBE · ПОИСК ВИДЕО</span><h3>Другие варианты</h3></div><button class="source-close rt-close" data-close aria-label="Закрыть">×</button></div><p class="hint">Выберите подходящий ролик. Озвучка указана, только если она известна из названия.</p><div class="rt-search">${seasonData ? `<select data-episode aria-label="Серия">${seasonData.episodes.map(e=>`<option value="${esc(e)}" ${String(e)===String(episode)?'selected':''}>Серия ${esc(e)}</option>`).join('')}</select>` : ''}<input placeholder="Озвучка или студия (необязательно)" aria-label="Поиск озвучки"><button class="btn ghost" data-search>Найти</button></div><div class="rt-list"><div class="spin"></div></div></div>`;
+  const priorFocus=document.activeElement; document.body.appendChild(modal); let seq=0;
+  const onKey=e=>{if(e.key==='Escape'){e.preventDefault();e.stopImmediatePropagation();close();}};
+  const close=()=>{document.removeEventListener('keydown',onKey,true);modal.remove();priorFocus?.focus?.();}; document.addEventListener('keydown',onKey,true); modal.querySelector('[data-close]').onclick=close; modal.onclick=e=>{if(e.target===modal)close()};
   const title = d._ao?.franchise?.nodes?.find(x=>String(x.id)===String(d._ao.franchise.currentId))?.name || d.name;
   const load=async()=>{const n=++seq,list=modal.querySelector('.rt-list');list.innerHTML='<div class="spin"></div>';const data=await window.lift.rutubeSearch({title,episode:chosenEpisode,season:String(d.id).startsWith('ao:') ? undefined : season,voice:modal.querySelector('input').value}).catch(()=>({error:'NETWORK'}));if(!modal.isConnected||n!==seq)return;
     if(data.error){list.innerHTML='<p class="hint">Rutube временно недоступен. Попробуйте ещё раз.</p>';return}
@@ -2028,13 +2178,18 @@ function chooseRutube(d, seasons, season, episode) {
   modal.querySelector('[data-search]').onclick=load;modal.querySelector('[data-episode]')?.addEventListener('change',e=>{chosenEpisode=e.target.value;load()});modal.querySelector('input').onkeydown=e=>{if(e.key==='Enter')load();if(e.key==='Escape'){e.stopPropagation();close()}};load();
 }
 async function playItem(d, seasons, season, episode, opts = {}) {
-  if (!opts.rutubeVideo && playing?.rutube && playing.d === d && (String(playing.season)!==String(season) || String(playing.episode)!==String(episode))) { chooseRutube(d,seasons,season,episode); return; }
+  if (document.getElementById('tvPipHolder')) tvStop();
+  window.lift.playerResolverMute?.(false);
+  if(playing && String(playing.d?.id)!==String(d?.id) && $('#player').classList.contains('pip-away'))await restorePip();
+  if (!opts.vkVideo && playing?.vk && playing.d === d && (String(playing.season)!==String(season) || String(playing.episode)!==String(episode))) { chooseVideoSource('vk',d,seasons,season,episode); return; }
+  if (!opts.rutubeVideo && playing?.rutube && playing.d === d && (String(playing.season)!==String(season) || String(playing.episode)!==String(episode))) { chooseVideoSource('rutube',d,seasons,season,episode); return; }
   const requestToken = ++playRequestToken;
+  if(opts.twitchChannel){const channel=String(opts.twitchChannel||'').toLowerCase();if(!/^[a-z0-9_]{3,25}$/.test(channel))return;playing={d,seasons:[],season:null,episode:null,key:'',watch:{id:d.id,source:'twitch'},twitch:true};adActive=false;clearInterval(progTimer);document.body.classList.add('playing');$('#player').classList.remove('hidden','idle','native-controls');$('#lpNativeToggle').classList.add('hidden');$('.pl-loader').classList.remove('done');$('#plTitle').textContent=d.name;const stream=await window.lift.twitchStream(channel).catch(()=>null);if(requestToken!==playRequestToken)return;if(!stream){await closePlayer();toast('Не удалось открыть Twitch');return;}const page=new URL('stream-player.html',location.href);page.searchParams.set('play',String(requestToken));page.hash=new URLSearchParams({src:stream}).toString();$('#plFrame').src=page.href;renderEpsBar();$('#plSub').textContent='Twitch · Прямой эфир';PL.open(0);clearTimeout(loaderT);loaderT=setTimeout(()=>$('.pl-loader').classList.add('done'),8000);return;}
   if (opts.rutubeVideo) {
     const video=opts.rutubeVideo;if(!/^[a-f0-9]{32}$/i.test(String(video.id||'')))return;
     const watch={id:watchIdFor(d,'rutube',d._ao),source:'rutube',voice:video.voice||'',aoSlug:d._ao?.slug||'',rutubeId:video.id,rutubeDuration:Number(video.duration)||0};
-    const key=progKey(watch.id,season,episode),resume=opts.fromStart?null:resumeInfo(watch.id,season,episode);
-    playing={d,seasons,season,episode,key,watch,ao:d._ao||null,rutube:true};adActive=false;clearInterval(progTimer);progTimer=setInterval(captureProgress,500);document.body.classList.add('playing');if(!opts.skipHistory)addHistory(d,season,episode,watch);
+    const key=sourceProgressKey('rutube',video.id,watch.id,season,episode),resume=opts.fromStart?null:sourceResumeInfo('rutube',video.id,watch.id,season,episode);
+    playing={d,seasons,season,episode,key,watch,ao:d._ao||null,rutube:true,sourceHistoryPending:opts.skipHistory?null:{source:'rutube',id:video.id}};adActive=false;clearInterval(progTimer);document.body.classList.add('playing');
     const player=$('#player');player.classList.remove('hidden','idle','native-controls');$('#lpNativeToggle').classList.remove('hidden','on');$('#lpNativeToggle').textContent='Интерфейс плеера';$('.pl-loader').classList.remove('done');$('#plTitle').textContent=d.name;
     const stream=await window.lift.rutubeStream(video.id).catch(()=>null);
     if(requestToken!==playRequestToken)return;
@@ -2042,8 +2197,9 @@ async function playItem(d, seasons, season, episode, opts = {}) {
     page.hash=stream ? new URLSearchParams({src:stream}).toString() : new URLSearchParams({id:video.id,duration:String(video.duration||0),t:String(resume?.t||0)}).toString();
     playing.rutubeFallback=!stream;
     $('#lpNativeToggle').classList.toggle('hidden',!!stream);
-    $('#plFrame').src=page.href;renderEpsBar();PL.open(stream ? (resume?.t||0) : 0);clearTimeout(loaderT);loaderT=setTimeout(()=>$('.pl-loader').classList.add('done'),8000);return;
+    $('#plFrame').src=page.href;renderEpsBar();PL.open(stream ? (resume?.t||0) : 0);progTimer=setInterval(captureProgress,500);clearTimeout(loaderT);loaderT=setTimeout(()=>$('.pl-loader').classList.add('done'),8000);return;
   }
+  if(opts.vkVideo){const video=opts.vkVideo;if(!/^-?\d+_\d+$/.test(String(video.id||'')))return;const watch={id:watchIdFor(d,'vk',d._ao),source:'vk',vkId:video.id,aoSlug:d._ao?.slug||''},key=sourceProgressKey('vk',video.id,watch.id,season,episode),resume=opts.fromStart?null:sourceResumeInfo('vk',video.id,watch.id,season,episode);playing={d,seasons,season,episode,key,watch,ao:d._ao||null,vk:true,sourceHistoryPending:opts.skipHistory?null:{source:'vk',id:video.id}};adActive=false;clearInterval(progTimer);document.body.classList.add('playing');const player=$('#player');player.classList.remove('hidden','idle','native-controls');$('#lpNativeToggle').classList.add('hidden');$('.pl-loader').classList.remove('done');$('#plTitle').textContent=d.name;const stream=await window.lift.vkStream(video.id).catch(()=>null);if(requestToken!==playRequestToken)return;if(!stream){await closePlayer();toast('Не удалось открыть видео VK');return;}const page=new URL('stream-player.html',window.location.href);page.searchParams.set('play',String(requestToken));page.hash=new URLSearchParams({src:stream}).toString();$('#plFrame').src=page.href;renderEpsBar();PL.open(resume?.t||0);progTimer=setInterval(captureProgress,500);clearTimeout(loaderT);loaderT=setTimeout(()=>$('.pl-loader').classList.add('done'),8000);return;}
   let ao = d._ao || null;
   const isAoOnly = String(d.id).startsWith('ao:');
   const mode = d._aoSrc?.mode || 'auto';
@@ -2058,28 +2214,29 @@ async function playItem(d, seasons, season, episode, opts = {}) {
     } else ao = mapped;
   }
   if (ao) {
-    const epKey = season ? String(episode) : String(ao.episodes[0] ?? 1);
-    const requestedVoice = d._aoSrc?.voice || '';
+    const requestedVoice = opts.aoVoiceExplicit || d._aoSrc?.voice || '';
     const wants2 = mode === 'animeon2' || (mode === 'auto' && ao.selfHosted?.available);
-    const hosted = ao.selfHosted?.translations?.[epKey];
-    const availableVoices = ao.voiceNames.filter(v => ao.voices?.[v]?.[epKey]);
-    const hostedVoices = wants2 && Array.isArray(hosted) ? availableVoices.filter(v => hosted.includes(v)) : availableVoices;
-    const options = hostedVoices.length ? hostedVoices : availableVoices;
-    const voice = findVoice(options, requestedVoice) || options[0] || '';
-    if (voice && d._aoSrc && voice !== requestedVoice) d._aoSrc.voice = voice;
-    aoUrl = (ao.voices[voice] || {})[epKey] || '';
-    if (wants2 && !aoUrl && mode === 'animeon2' && !isAoOnly && d.iframe_uri) toast('Серия недоступна на AnimeOn — включён резерв');
-    if (wants2 && aoUrl) {
-      const resolved = await window.lift.aoResolve({ link: aoUrl, animeId: ao.animeId, episode: Number(epKey), translation: voice }).catch(() => null);
+    const sources=animeonEpisodeSources(ao,episode,requestedVoice,wants2),epKey=sources.ep;
+    if(opts.aoVoiceExplicit && (!wants2 || !findVoice(sources.hosted,opts.aoVoiceExplicit))){toast('Эта озвучка сейчас недоступна');return;}
+    let voice=sources.nativeVoice || sources.reserveVoice;
+    aoUrl = ao.voices?.[sources.reserveVoice]?.[epKey] || '';
+    if (wants2 && sources.nativeVoice) {
+      const resolved = await window.lift.aoResolve({ link: ao.voices?.[sources.nativeVoice]?.[epKey] || '', animeId: ao.animeId, episode: Number(epKey), translation: sources.nativeVoice }).catch(() => null);
       if (requestToken !== playRequestToken) return;
-      if (resolved?.url) { officialUrl = resolved.url; officialAudio = resolved.audioIndex || 0; officialSkips = resolved.skips || []; officialDuration = resolved.duration || 0; selected = 'animeon2'; }
+      if (resolved?.url) { officialUrl = resolved.url; officialAudio = resolved.audioIndex || 0; officialSkips = resolved.skips || []; officialDuration = resolved.duration || 0; selected = 'animeon2'; voice=sources.nativeVoice; }
+      else if(opts.aoVoiceExplicit){toast('Эта озвучка сейчас недоступна');return;}
       else if (mode === 'animeon2') toast(resolved?.error === 'AUTH_REQUIRED' ? 'Для AnimeOn 2.0 подключите аккаунт в настройках' : resolved?.reason === 'self_hosted_unavailable' ? 'AnimeOn 2.0 для этой серии не найден — включён резерв' : 'AnimeOn 2.0 сейчас недоступен — включён резерв');
     }
+    if (!officialUrl) voice=sources.reserveVoice;
+    if (voice && d._aoSrc && (voice !== requestedVoice || opts.aoVoiceExplicit)) d._aoSrc.voice=voice;
+    if(opts.aoVoiceExplicit && officialUrl){d._aoSrc={...(d._aoSrc||{}),voice};saveWatchPref(d,ao,d._aoSrc);}
     // Резерв Luma используется только после проверки тайтла и серии.
     if (!officialUrl && isAoOnly) {
       reserve = await lumaReserveForAnime(ao, Number(epKey)).catch(() => null);
       if (requestToken !== playRequestToken) return;
-      if (reserve) selected = 'luma';
+      let canUseDirectReserve=false;try{canUseDirectReserve=!!aoUrl&&/(^|\.)kodikplayer\.com$/i.test(new URL(aoUrl).hostname);}catch{}
+      if (mode === 'reserve' && canUseDirectReserve && !opts._preferLuma) selected = 'external';
+      else if (reserve) selected = 'luma';
       else if (aoUrl) selected = 'external';
       else { toast('Эта серия недоступна в резервных плеерах'); return; }
     } else if (!officialUrl && !d.iframe_uri) {
@@ -2094,7 +2251,7 @@ async function playItem(d, seasons, season, episode, opts = {}) {
     : d._aoCurrentSeason && d.id !== watch.id && String(season) === d._aoCurrentSeason
       ? state.history.find(h => h.id === d.id && String(h.season) === '1' && String(h.episode) === String(episode)) : null;
   const resume = opts.fromStart ? null : (resumeInfo(watch.id, season, episode) || (legacyHistory ? resumeInfo(legacyHistory.id, legacyHistory.season, episode) : null));
-  playing = { d, seasons, season, episode, key, watch, ao, officialSkips, officialDuration, reserveFallback: reserve && aoUrl ? aoUrl : '' };
+  playing = { d, seasons, season, episode, key, watch, ao, officialSkips, officialDuration, reserveStartTime:resume?.t||0, reserveFallback: selected === 'luma' && reserve && aoUrl ? aoUrl : '', lumaFallback: selected === 'external' && !!reserve };
   if(d._pauseTmdb && season && episode){const requestPlaying=playing;window.lift.tmdbEpisodeDetail({id:d._pauseTmdb,season,episode}).then(details=>{if(playing===requestPlaying && details)playing.episodeInfo=details;}).catch(()=>{});}
   adActive = false;
   clearInterval(progTimer); progTimer = setInterval(captureProgress, 500);
@@ -2126,14 +2283,33 @@ async function playItem(d, seasons, season, episode, opts = {}) {
   try { const u = new URL(url); if (selected === 'luma' && season) { u.searchParams.set('season', reserve?.season || season); u.searchParams.set('episode', episode); } if (resume) u.searchParams.set('t', String(Math.floor(resume.t))); url = u.toString(); } catch {}
   if (resume) toast('Продолжаем с ' + fmtTime(resume.t));
   const fr = $('#plFrame');
-  const hideLoader = () => $('.pl-loader').classList.add('done');
-  fr.onload = () => setTimeout(hideLoader, 1200);   // тема уже внедрена к этому моменту, заставка Luma закрывает остатки загрузки
-  clearTimeout(loaderT); loaderT = setTimeout(hideLoader, 3500);   // на случай, если страница плеера досчитывает счётчики слишком долго
+  const requestPlaying=playing;
+  const needsKodik=selected==='external'&&(()=>{try{return /(^|\.)kodikplayer\.com$/i.test(new URL(aoUrl).hostname)}catch{return false}})();
+  requestPlaying.kodikPending=needsKodik;
+  if(needsKodik)window.lift.playerResolverMute?.(true);
+  const hideLoader = () => { if(playing===requestPlaying && requestPlaying.kodikPending && !requestPlaying.kodikDirect)return; $('.pl-loader').classList.add('done'); };
+  fr.onload = () => {if(playing===requestPlaying&&requestPlaying.kodikDirect)window.lift.playerResolverMute?.(false);setTimeout(hideLoader, 1200);};
+  clearTimeout(loaderT); loaderT = setTimeout(()=>{if(needsKodik && playing===requestPlaying && !requestPlaying.kodikDirect){requestPlaying.kodikAborted=true;fr.src='about:blank';window.lift.playerResolverMute?.(false);if(requestPlaying.lumaFallback){toast('Резервный поток недоступен — пробуем плеер Luma');playItem(d,seasons,season,episode,{...opts,_preferLuma:true});}else{$('.pl-loader').classList.add('done');toast('Не удалось загрузить резервный поток. Попробуйте ещё раз.');}}else hideLoader();}, needsKodik?20000:3500);   // на случай, если страница плеера досчитывает счётчики слишком долго
   fr.src = url;
   renderEpsBar();
   PL.open(resume ? resume.t : 0);
   autoplayWatch();
 }
+window.lift.onKodikManifest?.(async ({url,frameUrl}) => {
+  if(!playing || playing.watch?.source!=='external' || playing.kodikResolving || playing.kodikDirect || playing.kodikAborted)return;
+  const active=playing, token=playRequestToken, frame=$('#plFrame');
+  try{const a=new URL(frame.src),b=new URL(frameUrl);if(a.hostname!==b.hostname||a.pathname!==b.pathname)return;}catch{return;}
+  active.kodikResolving=true;
+  const streams=await window.lift.kodikQualities(url).catch(()=>[]);
+  if(playing!==active||token!==playRequestToken||active.kodikAborted)return;
+  active.kodikResolving=false;
+  if(!streams.length)return;
+  const current=Number(url.match(/\/(\d+)\.mp4:hls:manifest(?:-v[0-9]+-a[0-9]+)?\.m3u8/i)?.[1])||streams[0].quality;
+  streams.sort((a,b)=>(a.quality===current?-1:b.quality===current?1:a.quality-b.quality));
+  const time=active.reserveStartTime||0;
+  const page=new URL('stream-player.html',window.location.href);page.searchParams.set('play',String(token));page.hash=new URLSearchParams({src:url,srcs:JSON.stringify(streams),voice:active.watch.voice||''}).toString();
+  active.kodikDirect=true;active.kodikPending=false;adActive=false;PL.setAd(false);$('#lpNativeToggle').classList.add('hidden');frame.src=page.href;PL.open(time);
+});
 window.lift.onReserveLoadError?.((host) => {
   if (!playing?.reserveFallback || playing.watch?.source !== 'luma') return;
   try { if (new URL($('#plFrame').src).hostname !== host) return; } catch { return; }
@@ -2144,6 +2320,9 @@ window.lift.onReserveLoadError?.((host) => {
   $('#lpNativeToggle').classList.remove('hidden', 'on');
   $('#lpNativeToggle').textContent = 'Интерфейс плеера';
   toast('Резерв Luma недоступен. Открываем другой резервный плеер.');
+  const pending=playing;pending.kodikPending=true;$('.pl-loader').classList.remove('done');clearTimeout(loaderT);
+  window.lift.playerResolverMute?.(true);
+  loaderT=setTimeout(()=>{if(playing===pending&&!pending.kodikDirect){pending.kodikAborted=true;$('#plFrame').src='about:blank';window.lift.playerResolverMute?.(false);$('.pl-loader').classList.add('done');toast('Не удалось загрузить резервный поток. Попробуйте ещё раз.');}},20000);
   $('#plFrame').src = fallback;
   renderEpsBar(); PL.open(0); autoplayWatch();
 });
@@ -2194,7 +2373,7 @@ const SKIP_PREV = '<svg viewBox="0 0 24 24"><path d="M6 5v14M19 5.500v13L9 12z"/
 const SKIP_NEXT = '<svg viewBox="0 0 24 24"><path d="M18 5v14M5 5.500v13L15 12z"/></svg>';
 function renderEpsBar() {
   const { d, seasons, season, episode } = playing;
-  const sourceLabel = { animeon2: 'AnimeOn 2.0', external: 'Резервный плеер', luma: 'Luma', rutube:'Rutube' }[playing.watch?.source] || '';
+  const sourceLabel = { animeon2: 'AnimeOn 2.0', external: 'Резервный плеер', luma: 'Luma', rutube:'Rutube', vk:'VK Видео' }[playing.watch?.source] || '';
   const subtitle = [d.year, TYPES[d.type], sourceLabel].filter(Boolean).join(' · ');
   const box = $('#plEps');
   closePicker();
@@ -2247,13 +2426,18 @@ function paintPicker() {
   const cur = seasons.find((x) => x.season == pkSeason) || seasons[0];
   const seen = state.seen[historyId + ':' + cur.season] || [];
   $('#plPicker').innerHTML = `<div class="pk-head"><b>Выбор серии</b><span>${esc(d.name)}</span></div>
-    ${String(d.id).startsWith('ao:') && seasons.length === 1 ? '' : `<div class="pk-seasons">${seasons.map((s) => `<button class="pk-s ${s.season == cur.season ? 'on' : ''}" data-s="${s.season}">Сезон ${s.season}<small>${s.episodes.length}</small></button>`).join('')}</div>`}
-    <div class="pk-summary">${cur.episodes.length} серий · Сейчас: ${String(d.id).startsWith('ao:') && seasons.length === 1 ? `серия ${episode}` : `${season} сезон, серия ${episode}`}</div><div class="pk-eps">${cur.episodes.map((e, i) => {
+    ${String(d.id).startsWith('ao:') && seasons.length === 1 ? '' : `<div class="pk-season-nav"><button class="pk-season-arrow" data-season-scroll="-1" aria-label="Предыдущие сезоны">‹</button><div class="pk-seasons">${seasons.map((s) => `<button class="pk-s ${s.season == cur.season ? 'on' : ''}" data-s="${s.season}" aria-pressed="${s.season == cur.season}">Сезон ${s.season}<small>${s.episodes.length}</small></button>`).join('')}</div><button class="pk-season-arrow" data-season-scroll="1" aria-label="Следующие сезоны">›</button></div>`}
+    <div class="pk-summary">${cur.episodes.length} ${plural(cur.episodes.length,'серия','серии','серий')} · Сейчас: ${String(d.id).startsWith('ao:') && seasons.length === 1 ? `серия ${episode}` : `${season} сезон, серия ${episode}`}</div><div class="pk-eps pk-episode-list">${cur.episodes.map((e, i) => {
       const isCur = cur.season == season && e == episode, fin = isDone(historyId, cur.season, e), pct = fin ? 0 : progressPct(historyId, cur.season, e), watched = seen.includes(String(e)) || fin;
-      return `<button class="pk-e ${isCur ? 'cur' : ''} ${watched && !isCur ? 'seen' : ''} ${fin && !isCur ? 'done' : ''}" data-e="${e}" style="--i:${Math.min(i, 24)}" title="${isCur ? 'Сейчас смотрите' : fin ? 'Досмотрено' : watched ? 'Открывали' : 'Серия ' + e}"><span>${e}</span>${isCur ? '<small>Сейчас</small>' : fin ? '<small>Просмотрена</small>' : ''}${pct ? `<i style="width:${pct}%"></i>` : ''}</button>`;
+      const art=d._ao?.episodeStills?.[String(e)]||playing.ao?.episodeStills?.[String(e)]||d.poster||'';
+      return `<button class="pk-e pk-episode ${isCur ? 'cur' : ''} ${watched && !isCur ? 'seen' : ''} ${fin ? 'done' : ''}" data-e="${e}" title="${isCur ? 'Сейчас смотрите' : fin ? 'Досмотрено' : watched ? 'Открывали' : 'Серия ' + e}"><span class="pk-episode-art">${art?`<img src="${esc(art)}" data-fallback="${esc(art!==d.poster?d.poster||'':'')}" alt="" loading="lazy" onerror="const fallback=this.dataset.fallback;this.dataset.fallback='';if(fallback)this.src=fallback;else this.remove()">`:''}<em>▶</em></span><span class="pk-episode-copy"><b>Серия ${e}</b><small>${isCur?'Сейчас смотрите':fin?'Просмотрена':pct?`Просмотрено ${pct}%`:''}</small></span>${pct ? `<i style="width:${pct}%"></i>` : ''}</button>`;
     }).join('')}</div>`;
   $('.pk-seasons .on', $('#plPicker'))?.scrollIntoView({ block: 'nearest', inline: 'center' });
   $('.pk-e.cur', $('#plPicker'))?.scrollIntoView({ block: 'nearest' });
+  if(d._pauseTmdb&&!isAnime(d)){
+    const requested=playing,requestedSeason=String(cur.season);
+    window.lift.tmdbSeasonEpisodes({id:d._pauseTmdb,season:cur.season}).then(rows=>{if(playing!==requested||!pickerOpen()||String(pkSeason)!==requestedSeason)return;for(const row of rows||[]){const button=$(`#plPicker .pk-episode[data-e="${Number(row.number)}"]`);if(!button)continue;const title=$('.pk-episode-copy b',button),sub=$('.pk-episode-copy small',button);if(row.name)title.textContent=row.name;const detail=['Серия '+row.number,row.runtime?row.runtime+' мин.':''].filter(Boolean).join(' · ');sub.textContent=[detail,sub.textContent].filter(Boolean).join(' · ');if(row.still){let img=$('.pk-episode-art img',button);if(!img){img=document.createElement('img');img.alt='';img.loading='lazy';$('.pk-episode-art',button).prepend(img);}img.onerror=()=>{img.onerror=()=>img.remove();if(d.poster)img.src=d.poster;else img.remove();};img.src=TMG(row.still,'w500');}}}).catch(()=>{});
+  }
 }
 function openPicker() {
   if (!playing || (!playing.season && !playing.isTorr)) return;
@@ -2262,13 +2446,22 @@ function openPicker() {
   $('#plPicker').classList.remove('hidden'); $('#plPkBack').classList.remove('hidden'); $('#epPick').classList.add('open');
 }
 $('#plPicker').addEventListener('click', (e) => {
+  const arrow=e.target.closest('[data-season-scroll]');if(arrow){$('.pk-seasons',$('#plPicker'))?.scrollBy({left:Number(arrow.dataset.seasonScroll)*220,behavior:'smooth'});return;}
   const sb = e.target.closest('.pk-s'), eb = e.target.closest('.pk-e');
   if (sb) { pkSeason = sb.dataset.s; paintPicker(); return; }
   if (eb && playing?.isTorr) { const index=Number(eb.dataset.torr); closePicker(); if(Number.isInteger(index))window.__torrPlayAt?.(index); return; }
   if (eb && playing) { const { d, seasons } = playing; closePicker(); playItem(d, seasons, pkSeason, eb.dataset.e); }
 });
+$('#plPicker').addEventListener('wheel',e=>{const track=e.target.closest('.pk-seasons');if(track&&track.scrollWidth>track.clientWidth){track.scrollLeft+=e.deltaY;e.preventDefault();}},{passive:false});
 $('#plPkBack').addEventListener('click', closePicker);
+function pipReturned(){ $('#player').classList.remove('pip-away');document.body.classList.remove('player-pip');$('#plPipReturn').classList.add('hidden'); }
+async function restorePip(){await window.lift.playerPip('exit').catch(()=>{});pipReturned();}
+$('#plMiniplayer').onclick=async()=>{if(!playing)return;const r=await window.lift.playerPip('enter').catch(()=>({ok:false}));if(!r?.ok){toast('Этот источник не поддерживает отдельное окно');return;}$('#player').classList.add('pip-away');document.body.classList.add('player-pip');$('#plPipReturn').classList.remove('hidden');};
+$('#plPipReturn').onclick=restorePip;
+window.addEventListener('message',e=>{if(e.data?.lumaPip==='leave'&&playing&&(e.source===window||e.source===$('#plFrame').contentWindow||/^https:\/\/([\w-]+\.)?kodikplayer\.com$/i.test(e.origin)))pipReturned();});
 async function closePlayer() {
+  window.lift.playerResolverMute?.(false);
+  if($('#player').classList.contains('pip-away'))await restorePip();
   ++playRequestToken;
   // Экран входа показывается до создания `playing`; его тоже надо уметь
   // закрывать, иначе после «Отмена» остаётся чёрное окно с 0:00.
@@ -2334,17 +2527,17 @@ async function renderPerson(view, route, alive) {
   const roles = [...new Set((p.roles || []).map((x) => ROLE_RU[String(x).toLowerCase()]).filter(Boolean))];
   const modes = [];
   if (r.credits) { if (r.credits.actor.length) modes.push(['actor', 'Фильмография']); if (r.credits.director.length) modes.push(['director', 'Режиссёр']); }
-  view.innerHTML = `<div class="phead">
+  view.innerHTML = `<div class="phead catalog-intro person-intro">
       <div class="pphoto">${photo ? `<img src="${esc(photo)}" alt="${esc(p.name)}">` : `<span>${esc((p.name || '?')[0])}</span>`}</div>
       <div class="pinfo">
-        <div class="det-type">${roles.join(' · ') || 'Персона'}</div>
+        <div class="catalog-eyebrow">${esc(roles.join(' · ') || 'Персона')}</div>
         <h1>${esc(p.name)}</h1>
-        <div class="meta">${p.birthday ? `<span>${esc(ageText(p.birthday, p.deathday))}</span>` : ''}${p.place ? `<span>•</span><span>${esc(p.place)}</span>` : ''}</div>
-        ${p.bio ? `<p class="pbio" id="pBio">${esc(p.bio.replace(/^[^\wА-Яа-яЁё]+/, ''))}</p><button class="pill" id="pBioMore" style="display:none">Читать полностью</button>` : ''}
+        <div class="meta">${[p.birthday ? ageText(p.birthday, p.deathday) : '', p.place || ''].filter(Boolean).map(x => `<span>${esc(x)}</span>`).join('<span aria-hidden="true">·</span>')}</div>
+        ${p.bio ? `<p class="pbio" id="pBio">${esc(p.bio.replace(/^[^\wА-Яа-яЁё]+/, ''))}</p><button class="pill" id="pBioMore" aria-expanded="false" aria-controls="pBio" style="display:none">Читать полностью</button>` : ''}
       </div></div>
     <div id="pBody"></div>`;
   const bio = $('#pBio'), more = $('#pBioMore');
-  if (bio && bio.scrollHeight > bio.clientHeight + 2) { more.style.display = ''; more.onclick = () => { bio.classList.toggle('open'); more.textContent = bio.classList.contains('open') ? 'Свернуть' : 'Читать полностью'; }; }
+  if (bio && bio.scrollHeight > bio.clientHeight + 2) { more.style.display = ''; more.onclick = () => { bio.classList.toggle('open'); more.textContent = bio.classList.contains('open') ? 'Свернуть' : 'Читать полностью'; more.setAttribute('aria-expanded', String(bio.classList.contains('open'))); }; }
 
   const body = $('#pBody');
   if (!r.credits) {
@@ -2354,14 +2547,14 @@ async function renderPerson(view, route, alive) {
   }
   const found = { actor: [], director: [] }, checked = { actor: 0, director: 0 }, started = {};
   let mode = modes[0]?.[0] || 'actor', kind = 'all';
-  body.innerHTML = `<div class="filters" style="padding-top:22px">${modes.length > 1 ? `<div class="seg" id="pSeg"><span class="ind"></span>${modes.map(([k, t]) => `<button data-m="${k}">${t} (${r.credits[k].length})</button>`).join('')}</div>` : ''}
-      <span class="sp"></span><button class="pill on" data-k="all">Всё</button><button class="pill" data-k="film">Фильмы</button><button class="pill" data-k="tv">Сериалы</button></div>
+  body.innerHTML = `<div class="person-section-heading"><div><span class="catalog-eyebrow">РАБОТЫ</span><h2>Фильмография</h2></div></div><div class="filters catalog-toolbar person-toolbar">${modes.length > 1 ? `<div class="seg" id="pSeg"><span class="ind"></span>${modes.map(([k, t]) => `<button data-m="${k}">${t} (${r.credits[k].length})</button>`).join('')}</div>` : ''}
+      <span class="sp"></span><span class="catalog-filter-label">Тип</span><button class="pill on" data-k="all">Всё</button><button class="pill" data-k="film">Фильмы</button><button class="pill" data-k="tv">Сериалы</button></div>
     <p class="lprog" id="pProg" style="padding:0 32px"></p><div class="grid" id="pGrid"></div>`;
   const grid = $('#pGrid'), prog = $('#pProg'), seg = $('#pSeg');
   const isTv = (x) => [3, 4, 5, 7].includes(x.type);
   const paint = () => {
     const list = found[mode].filter((x) => kind === 'all' || (kind === 'tv') === isTv(x));
-    grid.innerHTML = list.map((it, i) => cardHTML(it, Math.min(i, 14))).join('') || (checked[mode] >= r.credits[mode].length ? '<div class="empty" style="grid-column:1/-1"><h3>В Luma пока ничего нет</h3>Загляните позже</div>' : '<div class="more" style="grid-column:1/-1"><div class="spin"></div></div>');
+    grid.innerHTML = list.map((it, i) => cardHTML(it, Math.min(i, 14))).join('') || (checked[mode] >= r.credits[mode].length ? (found[mode].length && kind !== 'all' ? '<div class="empty" style="grid-column:1/-1"><h3>По этому фильтру ничего не найдено</h3>Выберите другой тип</div>' : '<div class="empty" style="grid-column:1/-1"><h3>В Luma пока ничего нет</h3>Загляните позже</div>') : '<div class="more" style="grid-column:1/-1"><div class="spin"></div></div>');
     wireCards(grid);
     const total = r.credits[mode].length;
     prog.textContent = checked[mode] < total ? `Ищем в Luma… проверено ${checked[mode]} из ${total}, нашли ${found[mode].length}` : `В Luma есть ${found[mode].length} из ${total}`;
@@ -2394,6 +2587,8 @@ const LB_ERR = {
 };
 const plural = (n, a, b, c) => { const m = n % 100, d = n % 10; return m > 10 && m < 20 ? c : d === 1 ? a : d > 1 && d < 5 ? b : c; };
 const isSaved = (url) => state.lists.some((l) => l.url === url);
+const listSavedAt = url => Math.max(Date.now(), Number(state.gone?.['l:'+url]||0)+1);
+function markListRemoved(url){const at=Number(state.lists.find(x=>x.url===url)?.at||0);state.gone||={};state.gone['l:'+url]=Math.max(Date.now(),at+1,Number(state.gone['l:'+url]||0)+1);persist('gone');}
 const SRC = { letterboxd: ['Letterboxd', 'lb'], mdblist: ['MDBList', 'md'], trakt: ['Trakt', 'tr'], animeon: ['AnimeOn', 'ao'] };
 const srcOf = (l) => l.source || (String(l.url).startsWith('md:') ? 'mdblist' : String(l.url).startsWith('tr:') ? 'trakt' : 'letterboxd');
 function listCard(l, del) {
@@ -2442,8 +2637,8 @@ function segIndicator(seg) { const b = $('button.on', seg), i = $('.ind', seg); 
 
 async function renderLists(view, route, alive) {
   route.tab = route.tab || (state.lists.length ? 'saved' : 'find');
-  view.innerHTML = `<div class="page-head"><h1>Подборки</h1><p class="sub">Подборки сообщества AnimeOn и списки из Letterboxd, MDBList и Trakt.</p></div>
-    <div class="filters"><div class="seg" id="lTabs"><span class="ind"></span><button data-t="saved">Сохранённые (${state.lists.length})</button><button data-t="find">Найти</button><button data-t="popular">Популярные</button><button data-t="animeon">Сообщество AnimeOn</button></div></div><div id="lBody"></div>`;
+  view.innerHTML = `${libraryHeader('Подборки','Списки для просмотра, популярные темы и подборки сообщества.',state.lists.length,'сохранено')}
+    <div class="filters catalog-toolbar lists-toolbar"><span class="catalog-filter-label">Раздел</span><div class="seg" id="lTabs" aria-label="Разделы подборок"><span class="ind"></span><button data-t="saved" aria-pressed="false">Сохранённые <span class="lists-tab-count">${state.lists.length}</span></button><button data-t="find" aria-pressed="false">Найти</button><button data-t="popular" aria-pressed="false">Популярные</button><button data-t="animeon" aria-pressed="false">Сообщество AnimeOn</button></div></div><div id="lBody"></div>`;
   const body = $('#lBody'), seg = $('#lTabs');
   new MutationObserver(() => enhanceLists(body)).observe(body, { childList: true, subtree: true });
   const keyNote = (have) => (have.mdblist && have.trakt ? '' : `<div class="promo" style="margin:18px 0 0"><div><b>Поиск прямо в приложении</b><span>Подключите бесплатные ключи ${[!have.mdblist && 'MDBList', !have.trakt && 'Trakt'].filter(Boolean).join(' и ')} в настройках — и подборки будут искаться здесь, без окна браузера.</span></div><button class="btn primary" data-go-settings>Подключить</button></div>`);
@@ -2465,9 +2660,10 @@ async function renderLists(view, route, alive) {
       let sequence = 0, page = 1;
       const load = async () => {
         const seq = ++sequence; out.innerHTML = '<div class="more"><div class="spin"></div></div>'; pages.innerHTML = '';
-        const result = await window.lift.aoCollections({ query: input.value.trim(), page, sort: sort.value, tag: tag.value });
+        const result = await window.lift.aoCollections({ query: input.value.trim(), page, sort: sort.value, tag: tag.value }).catch(() => null) || {error:'NETWORK',items:[]};
         if (!alive() || route.tab !== 'animeon' || seq !== sequence) return;
-        out.innerHTML = result.error ? '<p class="hint bad">Не удалось загрузить подборки AnimeOn. Попробуйте ещё раз.</p>' : result.items.length ? `<div class="lgrid">${result.items.map((c) => `<div class="lcard ao-collection" data-ao-collection="${esc(c.slug)}"><div class="lcard-body"><h3>${esc(c.title)}</h3><p>${esc(c.desc || '')}</p><small>${esc(c.author || 'Сообщество')} · ${Number(c.count) || 0} тайтлов · ♥ ${Number(c.likes) || 0}</small>${c.covers?.length ? `<div class="lposters">${c.covers.filter((x) => x.poster).slice(0, 4).map((x) => `<img src="${esc(x.poster)}" alt="${esc(x.title)}" loading="lazy">`).join('')}</div>` : ''}</div></div>`).join('')}</div>` : '<p class="hint">Ничего не найдено.</p>';
+        out.innerHTML = result.error ? '<p class="hint bad">Не удалось загрузить подборки AnimeOn. Проверьте соединение.</p><button class="btn ghost" id="aoCollectionsRetry">Повторить</button>' : result.items.length ? `<div class="lgrid">${result.items.map((c) => `<div class="lcard ao-collection" data-ao-collection="${esc(c.slug)}"><div class="lcard-body"><h3>${esc(c.title)}</h3><p>${esc(c.desc || '')}</p><small>${esc(c.author || 'Сообщество')} · ${Number(c.count) || 0} тайтлов · ♥ ${Number(c.likes) || 0}</small>${c.covers?.length ? `<div class="lposters">${c.covers.filter((x) => x.poster).slice(0, 4).map((x) => `<img src="${esc(x.poster)}" alt="${esc(x.title)}" loading="lazy">`).join('')}</div>` : ''}</div></div>`).join('')}</div>` : '<p class="hint">Ничего не найдено.</p>';
+        if(result.error) $('#aoCollectionsRetry').onclick=load;
         if (!result.error && result.total > 24) {
           pages.innerHTML = `<button class="btn ghost" id="aoPagePrev" ${page <= 1 ? 'disabled' : ''}>Назад</button><span class="hint">Страница ${page} из ${Math.ceil(result.total / 24)}</span><button class="btn ghost" id="aoPageNext" ${page * 24 >= result.total ? 'disabled' : ''}>Дальше</button>`;
           $('#aoPagePrev').onclick = () => { page--; load(); };
@@ -2480,7 +2676,7 @@ async function renderLists(view, route, alive) {
     },
     saved() {
       body.innerHTML = state.lists.length ? `<div class="lgrid">${state.lists.map((l) => listCard(l, true)).join('')}</div>`
-        : '<div class="empty"><h3>Пока ни одной подборки</h3>Найдите её и нажмите «Сохранить на потом»</div>';
+        : '<div class="library-empty"><span class="library-empty-icon" aria-hidden="true">'+ico('film')+'</span><h2>Пока ни одной подборки</h2><p>Найдите интересный список и сохраните его, чтобы вернуться позже.</p><button class="btn ghost" data-lists-find>Найти подборку →</button></div>';
     },
     async popular() {
       body.innerHTML = '<div class="more"><div class="spin"></div></div>';
@@ -2493,7 +2689,8 @@ async function renderLists(view, route, alive) {
     },
     async find() {
       const have = await window.lift.keysStatus();
-      body.innerHTML = `<div class="find-wrap wide">
+      if (!alive() || route.tab !== 'find' || !body.isConnected) return;
+      body.innerHTML = `<div class="find-wrap wide lists-find-layout">
         <div class="set-card"><h2>Поиск подборок</h2><p class="hint" style="margin:6px 0 14px">Ищет сразу в MDBList и Trakt. Списки там названы по-английски, поэтому русский запрос переводится автоматически. Нажмите на найденный список, чтобы открыть его.</p>
           <div class="key-row"><input id="lq" placeholder="Например: halloween, film noir, space (можно и по-русски)" spellcheck="false" ${have.mdblist || have.trakt ? '' : 'disabled'}></div>
           <div id="lRes"></div>${have.mdblist || have.trakt ? '' : keyNote(have)}${have.mdblist && have.trakt ? '' : (have.mdblist || have.trakt ? keyNote(have) : '')}</div>
@@ -2516,7 +2713,6 @@ async function renderLists(view, route, alive) {
         res.innerHTML = note + errs + (r.lists.length ? `<div class="lgrid" style="padding:18px 0 0">${r.lists.map((l) => listCard(l)).join('')}</div>` : (Object.keys(r.errors).length ? '' : '<div class="empty" style="padding:30px 0"><h3>Ничего не нашлось</h3>Попробуйте другое слово или английское название</div>'));
       };
       lq.oninput = debounce(run, 400); lq.onkeydown = (e) => { if (e.key === 'Enter') run(); };
-      if (!lq.disabled) lq.focus(); else lbq.focus();
       const search = (q) => {
         q = (q || lbq.value).trim(); if (!q) return;
         state.lbRecent = [q, ...state.lbRecent.filter((x) => x !== q)].slice(0, 8); persist('lbRecent');
@@ -2529,30 +2725,40 @@ async function renderLists(view, route, alive) {
       $('#lbOpen').onclick = open; u.onkeydown = (e) => { if (e.key === 'Enter') open(); };
     }
   };
-  const sel = (t) => { route.tab = t; $$('button', seg).forEach((b) => b.classList.toggle('on', b.dataset.t === t)); segIndicator(seg); panels[t](); };
+  const sel = (t) => { route.tab = t; $$('button', seg).forEach((b) => { const selected=b.dataset.t===t;b.classList.toggle('on',selected);b.setAttribute('aria-pressed',String(selected)); }); segIndicator(seg); panels[t](); };
   seg.onclick = (e) => { const b = e.target.closest('button'); if (b) sel(b.dataset.t); };
   body.onclick = (e) => {
+    if(e.target.closest('[data-lists-find]')){sel('find');return;}
     const d = e.target.closest('[data-ldel]');
-    if (d) { e.stopPropagation(); state.lists = state.lists.filter((l) => l.url !== d.dataset.ldel); persist('lists'); toast('Подборка удалена'); renderLists($('#view'), route, alive); return; }
+    if (d) { e.stopPropagation(); markListRemoved(d.dataset.ldel); state.lists = state.lists.filter((l) => l.url !== d.dataset.ldel); persist('lists'); toast('Подборка удалена'); renderLists($('#view'), route, alive); return; }
     const ao = e.target.closest('[data-ao-collection]'); if (ao) { go({ name: 'list', url: 'animeon:' + ao.dataset.aoCollection }); return; }
     const c = e.target.closest('.lcard'); if (c) go({ name: 'list', url: c.dataset.url });
   };
   requestAnimationFrame(() => sel(route.tab));
 }
 
+function collectionHeader({source,title,author,count,countLabel,description,extra,actions}) {
+  return `<header class="lhead collection-detail"><div class="collection-copy"><span class="catalog-eyebrow">ПОДБОРКА <i></i> ${esc(source)}</span><h1>${esc(title)}</h1><div class="collection-meta"><span>Автор: ${esc(author||'сообщество')}</span>${extra?`<span>${esc(extra)}</span>`:''}</div>${description?`<div class="collection-description"><p class="ldesc" id="collectionDescription">${esc(description)}</p><button class="collection-desc-toggle" aria-expanded="false" aria-controls="collectionDescription" hidden>Показать полностью ↓</button></div>`:''}</div><aside class="collection-side"><div class="collection-side-count"><b>${Number(count)||0}</b><span>${esc(countLabel)}</span></div><div class="collection-actions">${actions}</div></aside></header>`;
+}
+function wireCollectionDescription(view) {
+  const text=view.querySelector('#collectionDescription'),button=view.querySelector('.collection-desc-toggle');if(!text||!button)return;
+  requestAnimationFrame(()=>{if(!text.isConnected)return;button.hidden=text.scrollHeight<=text.clientHeight+1;});
+  button.onclick=()=>{const open=button.getAttribute('aria-expanded')!=='true';button.setAttribute('aria-expanded',String(open));text.classList.toggle('expanded',open);button.textContent=open?'Свернуть ↑':'Показать полностью ↓';};
+}
 async function renderList(view, route, alive) {
   view.innerHTML = '<div class="empty"><div class="spin" style="margin:0 auto"></div><p style="margin-top:14px">Собираем подборку…</p></div>';
   if (String(route.url).startsWith('animeon:')) {
-    const c = await window.lift.aoCollection(String(route.url).slice(8));
+    const c = await window.lift.aoCollection(String(route.url).slice(8)).catch(() => ({error:'NETWORK'}));
     if (!alive()) return;
-    if (c.error) { view.innerHTML = '<div class="empty"><h3>Не удалось открыть подборку AnimeOn</h3>Попробуйте позже.</div>'; return; }
+    if (!c || c.error) { view.innerHTML = '<div class="empty"><h3>Не удалось открыть подборку AnimeOn</h3>Проверьте соединение.<br><br><button class="btn ghost" id="aoCollectionRetry">Повторить</button></div>'; $('#aoCollectionRetry').onclick=()=>renderList(view,route,alive); return; }
     const saved = () => isSaved(route.url);
     const opened = (x) => wasOpened(x);
     const openedCount = c.items.filter(opened).length;
-    view.innerHTML = `<div class="lhead"><div class="det-type">Подборка · AnimeOn</div><h1>${esc(c.title)}</h1><div class="meta"><span>от ${esc(c.author || 'сообщества')}</span><span>•</span><span>${c.items.length} тайтлов</span><span>•</span><span>Открывали ${openedCount} из ${c.items.length}</span></div>${c.desc ? `<p class="ldesc">${esc(c.desc)}</p>` : ''}<div class="row-btns"><button class="btn primary" id="aoCollectionSave"></button><button class="btn ghost" id="aoCollectionUnseen" aria-pressed="false">Только не открывавшиеся</button><button class="btn ghost" id="aoCollectionRelated">Что посмотреть похожего</button></div></div><div id="aoCollectionRelatedResults"></div><div class="grid" id="aoCollectionGrid"></div>`;
+    view.innerHTML = `${collectionHeader({source:'AnimeOn',title:c.title,author:c.author,count:c.items.length,countLabel:'тайтлов в подборке',description:c.desc,extra:`Открывали ${openedCount} из ${c.items.length}`,actions:'<button class="btn primary" id="aoCollectionSave"></button><button class="btn ghost" id="aoCollectionUnseen" aria-pressed="false">Только не открывавшиеся</button><button class="btn ghost" id="aoCollectionRelated">Что посмотреть похожего</button>'})}<div id="aoCollectionRelatedResults"></div><div class="collection-grid-head"><h2>В подборке</h2></div><div class="grid" id="aoCollectionGrid"></div>`;
+    wireCollectionDescription(view);
     const button = $('#aoCollectionSave');
     const paint = () => { button.textContent = saved() ? 'Сохранено' : 'Сохранить на потом'; };
-    paint(); button.onclick = () => { if (saved()) state.lists = state.lists.filter((x) => x.url !== route.url); else state.lists.unshift({ url: route.url, source: 'animeon', title: c.title, author: c.author, count: c.items.length, desc: (c.desc || '').slice(0, 160), names: c.items.slice(0, 3).map((x) => x.title) }); persist('lists'); paint(); };
+    paint(); button.onclick = () => { if (saved()) {markListRemoved(route.url);state.lists = state.lists.filter((x) => x.url !== route.url);} else state.lists.unshift({ url: route.url, source: 'animeon', title: c.title, author: c.author, count: c.items.length, desc: (c.desc || '').slice(0, 160), names: c.items.slice(0, 3).map((x) => x.title),at:listSavedAt(route.url) }); persist('lists'); paint(); };
     const grid = $('#aoCollectionGrid');
     let onlyUnseen = false;
     const paintGrid = () => { const items = c.items.filter((x) => !onlyUnseen || !opened(x)); grid.innerHTML = items.length ? items.map((x, i) => cardHTML(aoListToLuma(x), i, opened(x) ? { sub: 'Открывали' } : {})).join('') : '<div class="empty"><h3>Нет неоткрытых тайтлов</h3></div>'; wireCards(grid); };
@@ -2589,19 +2795,16 @@ async function renderList(view, route, alive) {
   if (r.error) { view.innerHTML = `<div class="empty"><h3>Не получилось открыть подборку</h3>${esc(LB_ERR[r.error] || '')}</div>`; return; }
   const l = r.list, total = l.films.length;
   const saved = () => isSaved(l.url);
-  view.innerHTML = `<div class="lhead">
-      <div class="det-type">Подборка · ${SRC[l.source]?.[0] || 'Letterboxd'}</div><h1>${esc(l.title)}</h1>
-      <div class="meta"><span>от ${esc(l.author)}</span><span>•</span><span>${l.count} ${plural(l.count, 'фильм', 'фильма', 'фильмов')}</span></div>
-      ${l.desc ? `<p class="ldesc">${esc(l.desc)}</p>` : ''}
-      <div class="row-btns" style="margin-top:18px"><button class="btn primary" id="lSave"></button>${/^https:/.test(l.url) ? `<button class="btn ghost" data-ext="${esc(l.url)}">Открыть на Letterboxd ↗</button>` : ''}</div>
-      <div class="lprog" id="lProg"></div></div>
-    <div class="grid" id="lGrid"></div><div class="more" id="lMore"><div class="spin"></div></div><div id="lMiss"></div>`;
+  const sourceName=SRC[l.source]?.[0] || 'Letterboxd';
+  const external=/^https:/.test(l.url)?`<button class="btn ghost" data-ext="${esc(l.url)}">Открыть на ${esc(sourceName)} ↗</button>`:'';
+  view.innerHTML = `${collectionHeader({source:sourceName,title:l.title,author:l.author,count:l.count||total,countLabel:plural(l.count||total,'фильм','фильма','фильмов')+' в списке',description:l.desc,actions:`<button class="btn primary" id="lSave"></button>${external}`})}<div class="collection-grid-head"><h2>В подборке</h2><div class="lprog" id="lProg" role="status" aria-live="polite"></div></div><div class="grid" id="lGrid"></div><div class="more" id="lMore"><div class="spin"></div></div><div id="lMiss"></div>`;
+  wireCollectionDescription(view);
   const btn = $('#lSave');
   const paintSave = () => { btn.innerHTML = saved() ? `${ico('heart')}Сохранено` : `${ico('heart')}Сохранить на потом`; btn.classList.toggle('on', saved()); };
   paintSave();
   btn.onclick = () => {
-    if (saved()) { state.lists = state.lists.filter((x) => x.url !== l.url); toast('Убрано из сохранённых'); }
-    else { state.lists.unshift({ url: l.url, source: l.source, title: l.title, author: l.author, count: l.count, desc: (l.desc || '').slice(0, 160), names: l.films.slice(0, 3).map((f) => f.title) }); toast('Подборка сохранена'); }
+    if (saved()) { markListRemoved(l.url); state.lists = state.lists.filter((x) => x.url !== l.url); toast('Убрано из сохранённых'); }
+    else { state.lists.unshift({ url: l.url, source: l.source, title: l.title, author: l.author, count: l.count, desc: (l.desc || '').slice(0, 160), names: l.films.slice(0, 3).map((f) => f.title),at:listSavedAt(l.url) }); toast('Подборка сохранена'); }
     persist('lists'); paintSave();
   };
   const grid = $('#lGrid'), prog = $('#lProg'), miss = [];
@@ -2684,7 +2887,7 @@ function setupSettingsGroups(view) {
   const secs = $$('.set-wrap > section', view);
   secs.forEach((s) => { s.dataset.grp = setGroupOf(s); });
   // длинные пошаговые инструкции сворачиваем: раскрыта только у ещё не подключённого TMDB
-  $$('ol.steps', view).forEach((ol, i) => {
+  $$('ol.steps:not(.ao-steps)', view).forEach((ol, i) => {
     const card = ol.closest('.sx, .set-card'), connected = !!(card && card.querySelector('.status.ok'));
     const d = document.createElement('details'); d.className = 'set-steps'; d.open = i === 0 && !connected;
     d.innerHTML = '<summary>Как это настроить</summary>'; ol.replaceWith(d); d.appendChild(ol);
@@ -2693,12 +2896,14 @@ function setupSettingsGroups(view) {
   nav.innerHTML = SET_GROUPS.map(([k, t, sub, ic]) => `<button class="set-nav-it" data-g="${k}"><svg viewBox="0 0 24 24">${ic}</svg><span><b>${t}</b><small>${sub}</small></span></button>`).join('');
   const show = (g) => {
     try { localStorage.setItem('luma.setgrp', g); } catch {}
-    $$('.set-nav-it', nav).forEach((b) => b.classList.toggle('on', b.dataset.g === g));
+    $$('.set-nav-it', nav).forEach((b) => {const selected=b.dataset.g===g;b.classList.toggle('on',selected);b.setAttribute('aria-pressed',String(selected));});
     secs.forEach((s) => { s.hidden = s.dataset.grp !== g; });
     const G = SET_GROUPS.find((x) => x[0] === g); if (G) { $('#setPtT', view).textContent = G[4]; $('#setPtS', view).textContent = G[5]; }
   };
   nav.onclick = (e) => { const b = e.target.closest('.set-nav-it'); if (b) show(b.dataset.g); };
-  view.addEventListener('click', (e) => { const h = e.target.closest('.sx-head'); if (!h) return; const x = h.parentElement; x.classList.toggle('open'); $('.sx-body', x).hidden = !x.classList.contains('open'); });
+  if(view._settingsExpandHandler)view.removeEventListener('click',view._settingsExpandHandler);
+  view._settingsExpandHandler = (e) => { const h = e.target.closest('.sx-head'); if (!h || !h.closest('.set-wrap')) return; const x = h.parentElement; x.classList.toggle('open'); const open=x.classList.contains('open'); $('.sx-body', x).hidden = !open; if(h.hasAttribute('aria-expanded'))h.setAttribute('aria-expanded',String(open)); };
+  view.addEventListener('click',view._settingsExpandHandler);
   $$('.sx', view).forEach((x) => { if (x.querySelector('.status') && !x.querySelector('.status.ok') && x.querySelector('#tmKey')) { x.classList.add('open'); $('.sx-body', x).hidden = false; } });
   let g0 = 'sync'; try { g0 = localStorage.getItem('luma.setgrp') || 'sync'; } catch {}
   show(SET_GROUPS.some((x) => x[0] === g0) ? g0 : 'sync');
@@ -2717,10 +2922,10 @@ async function renderSettings(view) {
     ['Вставьте ключ ниже и нажмите «Проверить и сохранить»', 'Приложение проверит его и запомнит на этом компьютере в зашифрованном виде.']
   ];
   const tmProxyUrl = (await window.lift.tmdbProxyGet()).url || '';
-  view.innerHTML = `<div class="page-head"><h1>Настройки</h1></div>
+  view.innerHTML = `<header class="catalog-intro catalog-intro-library"><div class="catalog-intro-copy"><span class="catalog-eyebrow">LUMA <i></i> ПАРАМЕТРЫ</span><h1>Настройки</h1><p>Аккаунт, сервисы и оформление приложения.</p></div></header>
   <div class="set-layout"><nav class="set-nav" id="setNav"></nav>
   <div class="set-wrap"><div class="set-pt"><h2 id="setPtT"></h2><p id="setPtS"></p></div>
-    <section class="sg" data-g="keys" data-t="AnimeOn" id="aoAuthCard"><div class="sl"><div class="sr"><div class="sr-t"><b>AnimeOn</b><small>Войдите, чтобы смотреть аниме в плеере AnimeOn 2.0.</small></div><div class="sr-a"><span class="status ${aoAuth.connected ? 'ok' : ''}" id="aoAuthStatus">${aoAuth.connected ? `Подключено${aoAuth.name ? ': ' + esc(aoAuth.name) : ''}` : 'Не подключено'}</span><button class="btn primary" id="aoPasswordOpen">${aoAuth.connected ? 'Изменить вход' : 'Войти'}</button><button class="btn ghost${aoAuth.connected ? '' : ' hidden'}" id="aoAuthDisconnect">Выйти</button></div></div></div><p class="hint" id="aoAuthMsg">${aoAuth.connected ? 'Аккаунт подключён.' : 'Используйте почту и пароль аккаунта AnimeOn.'}</p></section>
+    <section class="sx" data-g="keys" data-t="AnimeOn" id="aoAuthCard"><button type="button" class="sx-head ao-auth-head" aria-expanded="false" aria-controls="aoAuthBody"><span class="sx-ic">${SXI.key}</span><span class="sx-t"><b>AnimeOn</b><small>Вход нужен для просмотра через плеер AnimeOn 2.0 в Luma.</small></span><span class="status ${aoAuth.connected ? 'ok' : ''}" id="aoAuthStatus">${aoAuth.connected ? `Подключено${aoAuth.name ? ': ' + esc(aoAuth.name) : ''}` : 'Не подключено'}</span><i class="chev" aria-hidden="true"></i></button><div class="sx-body" id="aoAuthBody" hidden><ol class="steps ao-steps"><li><i>1</i><div><b>Откройте сайт AnimeOn</b><span>Зарегистрируйтесь с почтой и паролем, если у вас ещё нет аккаунта.</span><button class="pill" id="aoWebsite" type="button">Открыть сайт AnimeOn ↗</button></div></li><li><i>2</i><div><b>Вернитесь в Luma и войдите</b><span>Введите почту и пароль от аккаунта AnimeOn.</span></div></li></ol><div class="row-btns"><button class="btn primary" id="aoPasswordOpen">${aoAuth.connected ? 'Изменить вход' : 'Войти'}</button><button class="btn ghost${aoAuth.connected ? '' : ' hidden'}" id="aoAuthDisconnect">Выйти</button></div><p class="hint" id="aoAuthMsg">${aoAuth.connected ? 'Аккаунт подключён.' : 'Используйте почту и пароль аккаунта AnimeOn.'}</p></div></section>
     <section class="sx" data-g="keys"><div class="sx-head" data-exp><span class="sx-ic">${SXI.key}</span><div class="sx-t"><b>TMDB — подборки, кадры и рекомендации</b><small>The Movie Database — крупнейшая открытая база фильмов. С вашим ключом приложение показывает на главной тренды и лучшие подборки, на странице фильма — настоящие кадры, логотип и рекомендации зрителей. В каталог попадает только то, что есть на Luma.</small></div><span class="status ${tm.has && !tm.shared ? 'ok' : ''}" id="tmStatus">${tm.shared ? 'Тестовый общий ключ' : tm.has ? 'Подключено' : 'Не подключено'}</span><i class="chev"></i></div><div class="sx-body" hidden>
       <ol class="steps">${steps.map((s, i) => `<li><i>${i + 1}</i><div><b>${esc(s[0])}</b><span>${esc(s[1])}</span>${s[2] ? `<button class="pill" data-ext="${s[2][1]}">${esc(s[2][0])} ↗</button>` : ''}</div></li>`).join('')}</ol>
       <div class="key-row"><input id="tmKey" type="password" placeholder="${tm.has && !tm.shared ? '•••••••••••••••• (ключ сохранён)' : 'Вставьте ключ сюда'}" spellcheck="false" autocomplete="off">
@@ -2863,11 +3068,12 @@ export default {
     status.classList.toggle('ok',!!s?.connected);login.textContent=s?.connected?'Изменить вход':'Войти';
     disconnect?.classList.toggle('hidden',!s?.connected);msg.textContent=s?.connected?'Аккаунт подключён.':'Используйте почту и пароль аккаунта AnimeOn.';
   };
+  $('#aoWebsite').onclick = () => window.lift.openExternal('https://animeon.cc/');
   $('#aoPasswordOpen').onclick = async () => {
     const card=$('#aoAuthCard'),old=$('#aoPasswordForm',card);if(old){old.remove();return;}
     const box=document.createElement('form');box.id='aoPasswordForm';box.className='ao-password-form';
     box.innerHTML=`<div class="key-row"><input type="email" id="aoEmail" aria-label="Почта AnimeOn" placeholder="Почта AnimeOn" autocomplete="off" required><input type="password" id="aoPassword" aria-label="Пароль AnimeOn" placeholder="Пароль" autocomplete="new-password"></div><label class="ao-remember"><input type="checkbox" id="aoRemember"> Сохранить данные для следующего входа</label><div class="row-btns"><button type="submit" class="btn primary">Войти</button><button type="button" class="btn ghost hidden" id="aoForget">Удалить сохранённые данные</button></div><p class="hint" id="aoPasswordMsg">Сохранённые данные защищены на этом компьютере и синхронизируются с другими данными, если подключён Google Диск.</p>`;
-    card.append(box);const email=$('#aoEmail',box),password=$('#aoPassword',box),remember=$('#aoRemember',box),msg=$('#aoPasswordMsg',box),forget=$('#aoForget',box),submit=box.querySelector('[type=submit]');
+    $('#aoAuthBody',card).append(box);const email=$('#aoEmail',box),password=$('#aoPassword',box),remember=$('#aoRemember',box),msg=$('#aoPasswordMsg',box),forget=$('#aoForget',box),submit=box.querySelector('[type=submit]');
     const saved=await window.lift.aoSavedLogin().catch(()=>({saved:false}));if(!box.isConnected)return;
     if(saved.saved){email.value=saved.email;password.placeholder='Пароль сохранён';remember.checked=true;forget.classList.remove('hidden');}
     forget.onclick=async()=>{await window.lift.aoForgetLogin();window.lift.driveSync().catch(()=>{});password.value='';password.placeholder='Пароль';remember.checked=false;forget.classList.add('hidden');saved.saved=false;msg.textContent='Сохранённые данные удалены.';};
@@ -2881,7 +3087,7 @@ export default {
     };
     email.focus();
   };
-  if(currentRoute?.auth==='password') { $('#setNav [data-g=keys]').click(); $('#aoPasswordOpen').click(); }
+  if(currentRoute?.auth==='password') { $('#setNav [data-g=keys]').click(); const head=$('#aoAuthCard .sx-head');if(head?.getAttribute('aria-expanded')!=='true')head?.click();$('#aoPasswordOpen').click(); }
   $('#aoAuthDisconnect').onclick = async () => {
     await window.lift.aoAuthDisconnect();
     toast('Animeon отключён');
@@ -2895,7 +3101,7 @@ export default {
   };
   $('#dgCopy').onclick = async () => { try { await navigator.clipboard.writeText($('#dgOut').textContent); toast('Отчёт скопирован'); } catch { toast('Не получилось скопировать'); } };
   paintUpdateCard();
-  $('#clrHist').onclick = () => { state.history.forEach((h) => goneMark('h', h.id)); state.history = []; persist('history'); toast('История очищена'); renderSettings($('#view')); };
+  $('#clrHist').onclick = () => { state.history.forEach((h) => goneMark('h', h.id)); state.history = []; state.sourceHistory={};for(const k of Object.keys(state.progress))if(/^(?:vk|rutube)~/.test(k))delete state.progress[k];persist('progress'); persist('sourceHistory'); persist('history'); toast('История очищена'); renderSettings($('#view')); };
   $('#clrFav').onclick = () => { state.favs = []; persist('favs'); updateBadges(); toast('Избранное очищено'); renderSettings($('#view')); };
 }
 
@@ -2956,6 +3162,7 @@ function wireBackup() {
 let trailerOpenSequence = 0;
 async function openTrailer(t) {
   if (!t) return;
+  if (document.getElementById('tvPipHolder')) tvStop();
   const request=++trailerOpenSequence;
   $('#tmYoutube')?.remove(); $('#tmFrame').hidden = false; $('#tmFrame').src = 'about:blank';
   $('#trailerModal').classList.remove('hidden');
@@ -2975,23 +3182,24 @@ function closeTrailer() { trailerOpenSequence++; $('#trailerModal').classList.ad
 $('#tmClose').onclick = closeTrailer; $('.tm-back').onclick = closeTrailer;
 
 /* ================= поиск (палитра) ================= */
-let palSel = 0, palItems = [];
+let palSel = 0, palItems = [], palRequest = 0;
 function openPalette() {
+  ++palRequest; palItems = []; palSel = 0;
   $('#palette').classList.remove('hidden');
   const i = $('#palInput'); i.value = ''; i.focus();
   $('#palResults').innerHTML = `<div class="pal-hint">Начните вводить название, остальное найдём</div>`;
 }
-function closePalette() { $('#palette').classList.add('hidden'); }
+function closePalette() { ++palRequest; palItems = []; palSel = 0; $('#palette').classList.add('hidden'); }
 function paintPal() { $$('.pr', $('#palResults')).forEach((e, i) => e.classList.toggle('sel', i === palSel)); $$('.pr', $('#palResults'))[palSel]?.scrollIntoView({ block: 'nearest' }); }
-const doSearch = debounce(async (q) => {
-  if (q.trim().length < 2) { $('#palResults').innerHTML = '<div class="pal-hint">Начните вводить название, остальное найдём</div>'; return; }
-  const [items, pr, aoRaw] = await Promise.all([
-    search(q.trim()).catch(() => []),
+const doSearch = debounce(async (q, request) => {
+  if (request !== palRequest || $('#palette').classList.contains('hidden')) return;
+  const [base, pr, aoRaw] = await Promise.all([
+    search(q.trim()).then(items=>({items})).catch(() => ({items:[],error:true})),
     tm.has ? window.lift.peopleSearch(q.trim()).catch(() => null) : null,
     window.lift.aoSearch(q.trim()).catch(() => [])   // Animeon: там есть тайтлы, которых нет в Luma
   ]);
-  if ($('#palInput').value.trim() !== q.trim()) return;
-  const films = items.filter(it => !isAnime(it)).slice(0, 12), people = (pr && pr.people) || [];
+  if (request !== palRequest || $('#palette').classList.contains('hidden') || $('#palInput').value.trim() !== q.trim()) return;
+  const films = base.items.filter(it => !isAnime(it)).slice(0, 12), people = (pr && pr.people) || [];
   const matches = new Map();
   const normSearch = s => String(s || '').toLowerCase().replace(/ё/g, 'е').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
   const query = normSearch(q);
@@ -3005,13 +3213,13 @@ const doSearch = debounce(async (q) => {
   };
   const personRow = (p, i) => `<div class="pr person-row" style="--i:${i}" data-i="${i}">${p.photo ? `<img class="round" src="${esc(TMG(p.photo, 'w185'))}" alt="">` : '<img class="round" alt="">'}<div><b>${esc(p.name)}</b><small>${[p.dept === 'Directing' ? 'Режиссёр' : p.dept === 'Acting' ? 'Актёр' : p.dept, p.known.length ? 'известен по: ' + p.known.join(', ') : ''].filter(Boolean).map(esc).join(' · ')}</small></div></div>`;
   $('#palResults').innerHTML = palItems.length
-    ? unified.map((it, i) => filmRow(it, i, matches.get(String(it.id)) || String(it.id).startsWith('ao:'))).join('')
+    ? (unified.length ? '<div class="pal-sec">Фильмы, сериалы и аниме</div>' : '') + unified.map((it, i) => filmRow(it, i, matches.get(String(it.id)) || String(it.id).startsWith('ao:'))).join('')
       + (people.length ? '<div class="pal-sec">Люди</div>' + people.map((p, k) => personRow(p, unified.length + k)).join('') : '')
-    : '<div class="pal-hint">Такого пока нет</div>';
+    : base.error ? '<div class="pal-hint">Поиск временно недоступен. Попробуйте ещё раз.</div>' : '<div class="pal-hint">Такого пока нет</div>';
   paintPal();
 }, 220);
 const openPalItem = (x) => { if (!x) return; closePalette(); go(x.kind === 'person' ? { name: 'person', tmdb: x.p.tmdb } : { name: 'details', id: x.it.id }); };
-$('#palInput').addEventListener('input', (e) => doSearch(e.target.value));
+$('#palInput').addEventListener('input', (e) => { const value=e.target.value,request=++palRequest;palItems=[];palSel=0;if(value.trim().length<2){$('#palResults').innerHTML='<div class="pal-hint">Начните вводить название, остальное найдём</div>';return;}$('#palResults').innerHTML='<div class="pal-hint">Ищем…</div>';doSearch(value,request); });
 $('#palInput').addEventListener('keydown', (e) => {
   if (e.key === 'ArrowDown') { palSel = Math.min(palSel + 1, palItems.length - 1); paintPal(); e.preventDefault(); }
   else if (e.key === 'ArrowUp') { palSel = Math.max(palSel - 1, 0); paintPal(); e.preventDefault(); }
@@ -3030,7 +3238,7 @@ document.addEventListener('click', (e) => {
     e.stopPropagation();
     const card = dl.closest('.card');
     const id = idOf(dl.dataset.del);
-    state.history = state.history.filter((h) => h.id !== id); goneMark('h', id); persist('history');
+    state.history = state.history.filter((h) => String(h.id) !== String(id)); goneMark('h', id); persist('history');
     card.style.transition = 'opacity .25s, transform .25s'; card.style.opacity = 0; card.style.transform = 'scale(.9)';
     setTimeout(() => { card.remove(); if (!$('#rHist .card')) $('#rHist')?.remove(); }, 260);
     toast('Убрано из «Продолжить просмотр»');
@@ -3039,9 +3247,9 @@ document.addEventListener('click', (e) => {
   const quickFav=e.target.closest('[data-card-fav]'), quickPlay=e.target.closest('[data-card-play]');
   const quickCard=(quickFav || quickPlay)?.closest('.card[data-id]');
   if(quickCard && quickFav){const item=CARD_ACTIONS.get(quickCard.dataset.id);if(item){const selected=toggleFav(item);quickFav.classList.toggle('on',selected);quickFav.setAttribute('aria-label',selected?'Убрать из избранного':'В избранное');}return;}
-  if(quickCard && quickPlay){go({name:'details',id:idOf(quickCard.dataset.id),autoplay:true,from:currentRoute?.name==='section'?currentRoute.key:currentRoute?.name==='home'?'home':undefined});return;}
+  if(quickCard && quickPlay){if(playDirectSourceCard(CARD_ACTIONS.get(quickCard.dataset.id)))return;go({name:'details',id:idOf(quickCard.dataset.id),autoplay:true,from:currentRoute?.name==='section'?currentRoute.key:currentRoute?.name==='home'?'home':undefined});return;}
   const c = e.target.closest('.card[data-id]');
-  if (c && !c.classList.contains('skel') && !e.target.closest('[data-del]')) { go({ name: 'details', id: idOf(c.dataset.id), from: currentRoute?.name === 'section' ? currentRoute.key : currentRoute?.name === 'home' ? 'home' : undefined }); return; }
+  if (c && !c.classList.contains('skel') && !e.target.closest('[data-del]')) { if(playDirectSourceCard(CARD_ACTIONS.get(c.dataset.id)))return;go({ name: 'details', id: idOf(c.dataset.id), from: currentRoute?.name === 'section' ? currentRoute.key : currentRoute?.name === 'home' ? 'home' : undefined }); return; }
   if (e.target.closest('[data-go-settings]')) { go({ name: 'settings' }); return; }
   const ge = e.target.closest('.chip.genre[data-genre]');
   if (ge) { go({ name: 'section', key: ge.dataset.sec, genre: ge.dataset.genre }); return; }
@@ -3074,7 +3282,7 @@ $$('[data-win]').forEach((b) => b.onclick = () => window.lift.win(b.dataset.win)
 window.lift.onLbPicked((url) => go({ name: 'list', url }));
 window.lift.onListAdded((l) => {
   if (isSaved(l.url)) { toast('Этот список уже сохранён'); return; }
-  state.lists.unshift(l); persist('lists'); toast('Сохранено: ' + l.title);
+  state.lists.unshift({...l,at:listSavedAt(l.url)}); persist('lists'); toast('Сохранено: ' + l.title);
   if (currentRoute?.name === 'lists') render(currentRoute);
 });
 window.lift.onWinState((s) => {
@@ -3175,7 +3383,7 @@ window.lift.onSyncRequest((d) => {
   $('#tvAskNo').onclick = () => { window.lift.syncCancel(); $('#tvAsk')?.remove(); };
 });
 window.lift.onSyncRequestEnd(() => $('#tvAsk')?.remove());
-window.lift.onSyncApplied(async () => { await initStore(); await refreshTmdb(); updateBadges(); });
+window.lift.onSyncApplied(async () => { await initStore(); await refreshTmdb(); updateBadges(); if (currentRoute?.name === 'tv') { tvTick(true); tvGuideRefresh(); } });
 
 /* ================= синхронизация через Google Drive ================= */
 function driveStateText(st) {

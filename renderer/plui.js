@@ -27,7 +27,7 @@ const PL = (() => {
     if (playing?.isTorr) { try { window.__torrDriver?.(c, m); } catch {} return; }
     // Kodik receives commands through the main-process bridge. Sending the
     // same toggle to its top frame as well immediately undoes pause/play.
-    if (playing?.watch?.source !== 'external') {
+    if (playing?.watch?.source !== 'external' || playing?.kodikDirect) {
       try { frame().contentWindow.postMessage(m, '*'); } catch {}
     }
     // Kodik из Animeon может поместить <video> уровнем глубже iframe. Основной
@@ -50,7 +50,7 @@ const PL = (() => {
       <button class="lp-b skip" id="lpFwd" title="Вперёд на 10 секунд (→)">${IC.fwd}<small>10</small></button>
       <div class="lp-vol"><button class="lp-b" id="lpMute" title="Звук (M)">${IC.vol}</button><input id="lpVol" type="range" min="0" max="100" step="1" value="70"></div>
       <span class="lp-time"><b id="lpT">0:00</b><i>/</i><span id="lpD">0:00</span></span>
-      <span id="lpEnds" class="lp-ends"></span><span class="grow"></span>
+      <span id="lpEnds" class="lp-ends"></span><span class="lp-live-badge">● ПРЯМОЙ ЭФИР</span><span class="grow"></span>
       <button class="lp-chip" id="lpSleep" data-k="sleep" title="Таймер сна">◷</button>
       <button class="lp-chip hidden" id="lpSp" data-k="sp" title="Скорость"></button>
       <button class="lp-chip hidden" id="lpSnd" data-k="snd" title="Озвучка"></button>
@@ -147,7 +147,7 @@ const PL = (() => {
     updateSkipSegments(s);
     paintNext(s.nx);
     paintSub(s.cc && s.cc.v === 'Откл' ? '' : s.sub);
-    if (s.d > 0) $('.pl-loader').classList.add('done');
+    if (s.d > 0 && (!playing?.kodikPending || playing?.kodikDirect)) $('.pl-loader').classList.add('done');
   }
 
   function paintTime() {
@@ -272,14 +272,13 @@ const PL = (() => {
   function animeonVoiceState() {
     const p = playing;
     if (!(p?.ao || p?.d?._ao) || !['animeon2', 'external'].includes(p.watch?.source)) return null;
-    const ao = p.ao || p.d._ao, ep = String(p.season ? p.episode : (ao.episodes[0] ?? 1));
-    const available = ao.voiceNames.filter((v) => !!ao.voices[v]?.[ep]);
-    const tracks = p.watch.source === 'animeon2' ? S?.snd?.ls : null;
-    return { v: p.d._aoSrc?.voice || p.watch?.voice || '', ls: tracks?.length ? available.filter((v) => tracks.includes(v)) : available };
+    const ao = p.ao || p.d._ao, ep = String(p.episode ?? ao.episodes?.[0] ?? 1);
+    const available = p.watch.source === 'animeon2' ? (ao.selfHosted?.translations?.[ep] || []) : (ao.voiceNames || []).filter((v) => !!ao.voices?.[v]?.[ep]);
+    return { v: p.d._aoSrc?.voice || p.watch?.voice || '', ls: available.filter(v => typeof v === 'string' && v.trim()) };
   }
   function paintPop() {
     const d = POP[pop], st = popState(pop); if (!st) { closePop(); return; }
-    const html = `<h4>${d.title}</h4>` + st.ls.map((v, i) => `<button class="lp-opt ${v === st.v ? 'on' : ''}" data-i="${i}"><span>${esc(d.label(v))}</span>${IC.check}</button>`).join('');
+    const html = `<h4>${d.title}</h4>` + st.ls.map((v, i) => `<button class="lp-opt ${v === st.v ? 'on' : ''}" data-i="${i}" aria-pressed="${v === st.v}"><span>${esc(d.label(v))}</span>${IC.check}</button>`).join('');
     const sync = pop === 'cc' && S?.subSync ? `<h4>Синхронизация</h4><div class="lp-sizes"><button class="lp-sz" data-subshift="-0.5" aria-label="Субтитры раньше">−0,5 с</button><button class="lp-sz" data-subshift="reset">${subtitleOffset > 0 ? '+' : ''}${subtitleOffset.toFixed(1)} с</button><button class="lp-sz" data-subshift="0.5" aria-label="Субтитры позже">+0,5 с</button></div>` : '';
     const extra = pop === 'cc' ? sync + `<h4>Размер</h4><div class="lp-sizes">${SUB_SIZES.map(([k, l]) => `<button class="lp-sz ${k === subSize ? 'on' : ''}" data-sz="${k}">${l}</button>`).join('')}</div><h4>Цвет</h4><div class="lp-sizes">${[['white','Белый'],['yellow','Жёлтый']].map(([k,l])=>`<button class="lp-sz" data-subcolor="${k}">${l}</button>`).join('')}</div><h4>Фон</h4><div class="lp-sizes"><button class="lp-sz" data-subbg="dark">Тёмный</button><button class="lp-sz" data-subbg="none">Без фона</button></div><h4>Расположение</h4><div class="lp-sizes"><button class="lp-sz" data-subpos="bottom">Внизу</button><button class="lp-sz" data-subpos="higher">Выше</button></div><h4>Шрифт</h4><div class="lp-sizes"><button class="lp-sz" data-subfont="default">Обычный</button><button class="lp-sz" data-subfont="serif">С засечками</button></div>` : '';
     const box = $('#lpPop'); if (cache.pop !== html + extra) { box.innerHTML = html + extra; cache.pop = html + extra; }
@@ -320,9 +319,8 @@ const PL = (() => {
       }
       captureProgress().catch(() => {}).finally(() => {
         if (playing !== p) return;
-        p.d._aoSrc = { ...(p.d._aoSrc || {}), voice: v };
-        saveWatchPref(p.d, p.ao || p.d._ao, p.d._aoSrc);
-        playItem(p.d, p.seasons, p.season, p.episode);
+        if (p.watch.source === 'animeon2') playItem(p.d, p.seasons, p.season, p.episode, {aoVoiceExplicit:v});
+        else { p.d._aoSrc = { ...(p.d._aoSrc || {}), voice: v }; saveWatchPref(p.d, p.ao || p.d._ao, p.d._aoSrc); playItem(p.d, p.seasons, p.season, p.episode); }
       });
       return;
     }
@@ -418,15 +416,15 @@ const PL = (() => {
   build(); applySubSize(); root().dataset.subcolor=lsGet('pl.subcolor','white');root().dataset.subbg=lsGet('pl.subbg','dark');root().dataset.subpos=lsGet('pl.subpos','bottom');root().dataset.subfont=lsGet('pl.subfont','default');
   return {
     /** Запуск новой серии или фильма: сбрасываем состояние и показываем панели. */
-    open(resume) { subtitleOffset=0;skipKey='';skipTimes=[];skipDone.clear();$('#lpSkipSegment').classList.add('hidden');subLast = null; paintSub(''); S = null; volApplied = false; qualityApplied = false; voiceApplied = false; started = false; resumeAt = resume > 0 ? resume : 0; cache = {}; nextCancelled = false; nextTotal = 0; closePop(); paintNext(null); const p = root(); p.classList.remove('ad', 'noui', 'lp-ready', 'paused-info'); $('#lpAoSnd').classList.add('hidden'); $('#lpRtSnd').classList.add('hidden'); $('#lpWait').classList.remove('on'); $('.lp-prog').style.width = '0'; $('.lp-buf').style.width = '0'; $('#lpT').textContent = '0:00'; $('#lpD').textContent = '0:00'; poke(); },
-    close() { skipKey='';skipTimes=[];$('#lpSkipSegment').classList.add('hidden');clearTimeout(idleT); clearTimeout(sleepTimer); sleepDeadline=0; root().classList.remove('paused-info'); $('#lpSleep').classList.remove('on'); closePop(); S = null; document.body.classList.remove('lp-has-next'); },
+    open(resume) { subtitleOffset=0;skipKey='';skipTimes=[];skipDone.clear();$('#lpSkipSegment').classList.add('hidden');subLast = null; paintSub(''); S = null; volApplied = false; qualityApplied = false; voiceApplied = false; started = false; resumeAt = resume > 0 ? resume : 0; cache = {}; nextCancelled = false; nextTotal = 0; closePop(); paintNext(null); const p = root(); p.classList.remove('ad', 'noui', 'lp-ready', 'paused-info');p.classList.toggle('lp-live-stream',!!playing?.twitch); $('#lpAoSnd').classList.add('hidden'); $('#lpRtSnd').classList.add('hidden'); $('#lpWait').classList.remove('on'); $('.lp-prog').style.width = '0'; $('.lp-buf').style.width = '0'; $('#lpT').textContent = '0:00'; $('#lpD').textContent = '0:00'; poke(); },
+    close() { skipKey='';skipTimes=[];$('#lpSkipSegment').classList.add('hidden');clearTimeout(idleT); clearTimeout(sleepTimer); sleepDeadline=0; root().classList.remove('paused-info','lp-live-stream'); $('#lpSleep').classList.remove('on'); closePop(); S = null; document.body.classList.remove('lp-has-next'); },
     /** Состояние от локального движка (торрент-плеер): прогоняем через тот же конвейер, что состояние плеера сайта. */
     feed(s) { onState(s); },
     /** Карточка «Следующая серия» (торрент-плеер: s — {title, n} или null чтобы скрыть). */
     next(nx) { paintNext(nx); },
     setAd(on) { root().classList.toggle('ad', !!on); if (on) $('#lpWait').classList.remove('on'); },
     /** Последнее известное время и длительность (обновляется 4 раза в секунду). */
-    time() { return S && S.d > 0 ? { t: S.t, d: S.d, p: S.p } : null; },
+    time() { return S && S.d > 0 ? { t: S.t, d: S.d, p: S.p, wait: !!S.wait, err: !!S.err } : null; },
     popOpen: () => !!pop,
     closePop,
     poke,
