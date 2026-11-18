@@ -10,6 +10,19 @@ const { dialog } = require('electron');
 const FORMAT = 1;
 // кэши и зашифрованные ключи в «данные» не входят: ключи едут отдельным блоком secrets
 const EXCLUDE = (k) => /(Enc|Key)$/.test(k) || k === 'animeonLoginTs' || k === 'lbMatches' || k === 'matches' || k === 'updSkip';
+function mergeTvFavorites(localList, localMeta, incomingList, incomingMeta) {
+  const meta = Object.create(null);
+  for (const source of [localMeta, incomingMeta]) if (source && typeof source === 'object' && !Array.isArray(source)) {
+    for (const [id, item] of Object.entries(source)) {
+      if (!id || ['__proto__','prototype','constructor'].includes(id) || !item || typeof item.on !== 'boolean' || !Number.isSafeInteger(item.ts) || item.ts <= 0) continue;
+      const prev = meta[id];
+      if (!prev || item.ts > prev.ts || (item.ts === prev.ts && !item.on && prev.on)) meta[id] = {on:item.on, ts:item.ts};
+    }
+  }
+  const list = [...new Set([...(Array.isArray(localList)?localList:[]), ...(Array.isArray(incomingList)?incomingList:[])].filter(id=>typeof id==='string'||typeof id==='number').map(String).filter(Boolean))];
+  for (const [id, item] of Object.entries(meta)) if (item.on && !list.includes(id)) list.push(id);
+  return { list:list.filter(id=>!meta[id] || meta[id].on), meta };
+}
 
 module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWindow, secrets }) {
   let pending = null; // { file, obj }
@@ -45,7 +58,7 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
   function merge(cur, inc) {
     const out = { ...cur };
     for (const [k, v] of Object.entries(inc)) {
-      if (EXCLUDE(k)) continue;
+      if (EXCLUDE(k) || k === 'tvFav' || k === 'tvFavMeta') continue;
       if (k === 'favs') out.favs = mergeFavorites([...(cur.favs || []), ...(v || [])]);
       else if (k === 'lists') out.lists = mergeLists([...(cur.lists || []), ...(v || [])]);
       else if (k === 'history') {
@@ -56,8 +69,7 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
         out.seen = { ...(cur.seen || {}) };
         for (const [sk, arr] of Object.entries(v || {})) out.seen[sk] = [...new Set([...(out.seen[sk] || []), ...arr])];
       } else if (k === 'done') { out.done = { ...(cur.done || {}) }; for (const [dk, arr] of Object.entries(v || {})) out.done[dk] = [...new Set([...(out.done[dk] || []), ...arr])];
-      } else if (k === 'tvFav') out.tvFav = [...new Set([...(cur.tvFav || []), ...(v || [])])];
-      else if (k === 'tvStats') { out.tvStats = { ...(cur.tvStats || {}) }; for (const [id, st] of Object.entries(v || {})) { const o = out.tvStats[id]; if (!o || (st.last || 0) > (o.last || 0)) out.tvStats[id] = { ...st, n: Math.max(st.n || 0, o ? o.n || 0 : 0), t: Math.max(st.t || 0, o ? o.t || 0 : 0) }; } }
+      } else if (k === 'tvStats') { out.tvStats = { ...(cur.tvStats || {}) }; for (const [id, st] of Object.entries(v || {})) { const o = out.tvStats[id]; if (!o || (st.last || 0) > (o.last || 0)) out.tvStats[id] = { ...st, n: Math.max(st.n || 0, o ? o.n || 0 : 0), t: Math.max(st.t || 0, o ? o.t || 0 : 0) }; } }
       else if (k === 'tvEpgLinks') { out.tvEpgLinks = { ...(cur.tvEpgLinks || {}) }; for (const [id, link] of Object.entries(v || {})) if (link && typeof link === 'object' && Number(link.ts || 0) > Number(out.tvEpgLinks[id]?.ts || 0)) out.tvEpgLinks[id] = link; }
       else if (k === 'sourceHistory') { out.sourceHistory = { ...(cur.sourceHistory || {}) }; for (const [sk,sv] of Object.entries(v || {})) if (sv && (!out.sourceHistory[sk] || (sv.ts || 0) > (out.sourceHistory[sk].ts || 0))) out.sourceHistory[sk] = sv; }
       else if (k === 'sportReminders') { if (v && typeof v === 'object' && !Array.isArray(v)) { out.sportReminders = { ...(cur.sportReminders || {}) }; for (const [id, item] of Object.entries(v)) if (item && typeof item === 'object' && !Array.isArray(item) && (!out.sportReminders[id] || Number(item.ts || 0) > Number(out.sportReminders[id].ts || 0))) out.sportReminders[id] = item; } }
@@ -69,6 +81,7 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
       else if (k === 'lbRecent') out.lbRecent = [...new Set([...(v || []), ...(cur.lbRecent || [])])].slice(0, 8);
       else out[k] = v; // остальные настройки берём из копии
     }
+    if (cur.tvFav || cur.tvFavMeta || inc.tvFav || inc.tvFavMeta) { const result = mergeTvFavorites(cur.tvFav, cur.tvFavMeta, inc.tvFav, inc.tvFavMeta); out.tvFav = result.list; out.tvFavMeta = result.meta; }
     // отметки об удалении: удалённое на одном устройстве не возвращается с другого
     const gone = out.gone || cur.gone || {}, cut = Date.now() - 90 * 864e5;
     for (const gk of Object.keys(gone)) if (gone[gk] < cut) delete gone[gk];
@@ -77,7 +90,7 @@ module.exports = function initBackup({ ipcMain, app, getStore, saveStore, getWin
       if (out.favs) out.favs = out.favs.filter((f) => !(gone['f:' + f.id] > (f.at || 0)));
       if (out.lists) out.lists = out.lists.filter((l) => !(gone['l:' + l.url] > (l.at || 0)));
       const prog = out.progress || cur.progress || {};   // был просмотр позже удаления: запись остаётся
-      if (out.history) out.history = out.history.filter((h) => !(gone['h:' + h.id] > (h.ts || 0) && !Object.entries(prog).some(([k, p]) => k.startsWith(h.id + ':') && (p.ts || 0) > gone['h:' + h.id])));
+      if (out.history) out.history = out.history.filter((h) => !(gone['h:' + h.id] > (h.ts || 0) && !Object.entries(prog).some(([k, p]) => { const base=String(k).replace(/^(?:vk|rutube)~[^~]+~/,'');return (base===String(h.id)||base.startsWith(String(h.id)+':'))&&(p.ts||0)>gone['h:'+h.id]; })));
     }
     return out;
   }

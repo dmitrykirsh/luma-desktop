@@ -26,8 +26,10 @@ const TVI = {
 /* ---------- память: избранное и просмотры ---------- */
 const tvFav = (id) => state.tvFav.includes(id);
 function tvToggleFav(id) {
-  state.tvFav = tvFav(id) ? state.tvFav.filter((x) => x !== id) : [id, ...state.tvFav];
-  persist('tvFav'); return tvFav(id);
+  const on = !tvFav(id), old = state.tvFavMeta[id];
+  state.tvFav = on ? [id, ...state.tvFav] : state.tvFav.filter((x) => x !== id);
+  state.tvFavMeta[id] = { on, ts: Math.max(Date.now(), Number(old?.ts || 0) + 1) };
+  persist('tvFavMeta'); persist('tvFav'); return on;
 }
 const tvStat = (id) => (state.tvStats[id] ||= { n: 0, t: 0, last: 0, name: '' });   // только для записи просмотров; для чтения — state.tvStats[id]
 function tvTrim() { const ids = Object.keys(state.tvStats); if (ids.length > 300) ids.sort((a, b) => state.tvStats[a].last - state.tvStats[b].last).slice(0, ids.length - 300).forEach((k) => delete state.tvStats[k]); }

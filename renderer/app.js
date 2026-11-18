@@ -43,7 +43,7 @@ const SECTIONS = {
 };
 
 /* ================= состояние ================= */
-const state = { favs: [], history: [], seen: {}, lists: [], lbRecent: [], progress: {}, done: {}, watchPrefs: {}, sportFollows: {}, sportReminders: {}, sourceHistory: {}, playerVoicePrefs: {}, trackedPremieres: [], tvFav: [], tvStats: {}, tvEpgLinks: {}, tvPrefs: { scope: 'stable', vol: 1, muted: false }, tvLast: '', updSkip: '' };
+const state = { favs: [], history: [], seen: {}, lists: [], lbRecent: [], progress: {}, done: {}, watchPrefs: {}, sportFollows: {}, sportReminders: {}, sourceHistory: {}, playerVoicePrefs: {}, trackedPremieres: [], tvFav: [], tvFavMeta: {}, tvStats: {}, tvEpgLinks: {}, tvPrefs: { scope: 'stable', vol: 1, muted: false }, tvLast: '', updSkip: '' };
 let store = {};
 async function initStore() {
   store = (await window.lift.getStore()) || {};
@@ -64,6 +64,7 @@ async function initStore() {
   state.playerVoicePrefs = store.playerVoicePrefs && typeof store.playerVoicePrefs === 'object' && !Array.isArray(store.playerVoicePrefs) ? store.playerVoicePrefs : {};
   migrateDone();
   state.tvFav = store.tvFav || [];
+  state.tvFavMeta = store.tvFavMeta && typeof store.tvFavMeta === 'object' && !Array.isArray(store.tvFavMeta) ? store.tvFavMeta : {};
   state.tvStats = store.tvStats || {};
   state.tvEpgLinks = store.tvEpgLinks || {};
   state.tvPrefs = Object.assign({ scope: 'stable', vol: 1, muted: false }, store.tvPrefs || {});

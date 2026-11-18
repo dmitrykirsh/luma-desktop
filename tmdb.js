@@ -8,7 +8,7 @@ const MOVIE_TYPES = [1, 2, 6];
 
 // Avoid assigning artwork or trailers to a similarly named remake.
 function tmdbSelectMatch(results, {names, year, kind, anime}) {
-  const norm=x=>String(x||'').toLowerCase().replace(/ё/g,'е').normalize('NFKC').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
+  const norm=x=>String(x||'').toLowerCase().replace(/ё/g,'е').normalize('NFKC').replace(/(\p{L})(\d)/gu,'$1 $2').replace(/[^\p{L}\p{N}]+/gu,' ').trim();
   const inputs=[...new Set((names||[]).map(norm).filter(Boolean))];
   if(!inputs.length)return null;
   const requestedYear=Number(year)||0,scored=[];
@@ -236,7 +236,7 @@ module.exports = function initTmdb({ ipcMain, safeStorage, getStore, saveStore, 
     try {
       const kind = TV_TYPES.includes(Number(it.type)) ? 'tv' : 'movie';
       const anime = [6, 7].includes(Number(it.type));
-      const clean = (s) => anime ? String(s || '').replace(/\s*\[(?:ТВ|TV)[-\s]*\d+(?:[^\]]*)\]/gi, '').replace(/\s+(?:season|сезон)\s*\d+(?:\s*(?:part|часть)\s*\d+)?\s*$/i, '').replace(/\s*\((?:19|20)\d{2}\)\s*$/g, '').trim() : String(s || '').trim();
+      const clean = (s) => anime ? String(s || '').replace(/\s*\[(?:ТВ|TV)[-\s]*\d+(?:[^\]]*)\]/gi, '').replace(/(\((?:19|20)\d{2}\))\s+\d+\s*$/, '$1').replace(/\s+(?:(?:season|сезон)\s*\d+(?:\s*(?:part|часть)\s*\d+)?|\d+(?:st|nd|rd|th)\s+season)\s*$/i, '').replace(/\s*\((?:19|20)\d{2}\)\s*$/g, '').trim() : String(s || '').trim();
       const name = clean(it.name), origin = clean(it.origin_name);
       const aliases=(Array.isArray(it.aliases)?it.aliases:[]).map(clean);const queries = [...new Set([origin, origin.replace(/uu/gi, 'u'), name, ...aliases].filter(Boolean))];
       let found = null;
